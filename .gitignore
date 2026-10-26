@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.local/
+.env
+.env.*
+!.env.example
+node_modules/
+*.tgz
+.DS_Store
+.npmrc
+auth.json
+*.py[cod]

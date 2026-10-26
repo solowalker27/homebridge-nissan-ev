@@ -1,0 +1,51 @@
+{
+  "name": "homebridge-nissan-ev",
+  "version": "0.2.0",
+  "description": "One HomeKit accessory per MyNISSAN vehicle, with linked status and remote-control services",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": [
+    "homebridge-plugin",
+    "nissan",
+    "ariya",
+    "homekit"
+  ],
+  "engines": {
+    "node": "^22 || ^24 || ^26",
+    "homebridge": ">=1.8.0 <3.0.0"
+  },
+  "files": [
+    "index.js",
+    "lib/*.js",
+    "homebridge-ui/",
+    "python/nissan_bridge.py",
+    "config.schema.json",
+    "requirements.txt",
+    "README.md",
+    "docs/INSTALL-UTM.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js && node --check lib/platform.js && node --check lib/vehicle.js && node --check lib/bridge.js && node --check lib/auth-ui.js && node --check homebridge-ui/server.js && node --check homebridge-ui/public/app.js"
+  },
+  "devDependencies": {
+    "homebridge": "2.4.0"
+  },
+  "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.2.6"
+  },
+  "author": "solowalker27",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solowalker27/homebridge-nissan-ev.git"
+  },
+  "homepage": "https://github.com/solowalker27/homebridge-nissan-ev#readme",
+  "bugs": {
+    "url": "https://github.com/solowalker27/homebridge-nissan-ev/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

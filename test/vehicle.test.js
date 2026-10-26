@@ -1,0 +1,271 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const hap = require('@homebridge/hap-nodejs');
+const { PlatformAccessory } = require('../node_modules/homebridge/dist/platformAccessory.js');
+const { VehicleAccessory } = require('../lib/vehicle');
+const { NissanPlatform } = require('../lib/platform');
+const { active, locked, opened, celsius, maintenanceStatus, chargeSettingEvidence, serviceEvidence, maintenanceEvidence } = require('../lib/state');
+
+const vin = 'TESTVIN00000000001';
+function snapshot() {
+  return {
+    status: {
+      vin, battery: { level: 92, is_charging: false, is_plugged_in: true, remaining_mileage: { value: 281, unit: 'MILE' } },
+      doors: { overall_lock: 'LOCKED', front_left: { ajar: 'CLOSED', window: 'CLOSED', lock: 'LOCKED' }, hatch_ajar: 'CLOSED' },
+      climate: { state: 'OFF', temperature: { value: 21, unit: 'CELSIUS' } },
+      mileage: { total: 12000, unit: 'MILE' }, tire_pressure: { front_left: 36 },
+    },
+    defaults: { climate: { value: 22, unit: 'CELSIUS' }, parameters: { steering_wheel_heater: false, seats: { front_driver: 'OFF' } } },
+    capabilities: { services: [] }, charge_config: { charge_limit_percent: 80 },
+    charge_schedules: [{ id: 'weekday', state: 'ENABLED', duration: 'PT2H' }],
+    climate_schedules: { schedules: [] }, fetched_at: new Date().toISOString(), errors: {},
+  };
+}
+function setup(config = {}, settings = {}, accessory) {
+  const calls = [];
+  let data = snapshot();
+  let request = async (method, args) => {
+    calls.push({ method, args });
+    if (method === 'snapshot') return data;
+    if (method === 'vehicles') return [{ vin, model: 'ARIYA', year: '2023' }];
+    return { complete: true };
+  };
+  const api = { hap, platformAccessory: PlatformAccessory, updatePlatformAccessories() {} };
+  const platform = { api, config, bridge: { request: (...args) => request(...args) }, log: { info() {}, warn() {} } };
+  accessory ||= new PlatformAccessory('Ariya', hap.uuid.generate(`homebridge-nissan-connect:${vin}`));
+  accessory._associatedPlugin = 'homebridge-nissan-ev';
+  accessory._associatedPlatform = 'NissanConnect';
+  const controller = new VehicleAccessory(platform, accessory, { vin, model: 'ARIYA', year: '2023' }, settings);
+  return { controller, accessory, platform, calls, setData(value) { data = value; }, setRequest(value) { request = value; } };
+}
+const char = (ctx, key, Type) => ctx.accessory.services.find(s => s.subtype === `nissan:${key}`).getCharacteristic(Type);
+
+test('one accessory contains correctly linked standard services and preserves observed state', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 92);
+  assert.equal(await char(ctx, 'lock', hap.Characteristic.LockCurrentState).handleGetRequest(), 1);
+  assert.equal(await char(ctx, 'charge', hap.Characteristic.On).handleGetRequest(), false);
+  assert.equal(await char(ctx, 'plug', hap.Characteristic.ContactSensorState).handleGetRequest(), 0);
+  assert.equal(await char(ctx, 'front_left-ajar', hap.Characteristic.ContactSensorState).handleGetRequest(), 0);
+  for (const service of ctx.accessory.services) {
+    if (service.subtype && service !== ctx.controller.primary) assert.ok(ctx.controller.primary.linkedServices.includes(service));
+  }
+  assert.deepEqual(ctx.calls.map(c => c.method), ['snapshot']);
+  ctx.controller.stop();
+});
+
+test('renaming and restart preserve accessory UUID, service identities, and selected name', async () => {
+  const ctx = setup({}, { name: 'Bluebird' });
+  await ctx.controller.refresh();
+  const ids = ctx.accessory.services.map(s => s.getServiceId());
+  const uuid = ctx.accessory.UUID;
+  ctx.controller.rename('Roadrunner');
+  ctx.controller.stop();
+  const restored = PlatformAccessory.deserialize(PlatformAccessory.serialize(ctx.accessory));
+  const next = setup({}, { name: 'Bluebird' }, restored);
+  await next.controller.refresh();
+  assert.equal(next.controller.name, 'Roadrunner');
+  assert.equal(next.accessory.UUID, uuid);
+  assert.deepEqual(next.accessory.services.map(s => s.getServiceId()), ids);
+  next.controller.stop();
+  const renamed = setup({}, { name: 'New Config Name' }, restored);
+  assert.equal(renamed.controller.name, 'New Config Name');
+  assert.equal(renamed.accessory.UUID, uuid);
+  renamed.controller.stop();
+});
+
+test('a large telemetry payload stays within HomeKit service limits', async () => {
+  const ctx = setup();
+  const data = snapshot();
+  data.capabilities.extra = Object.fromEntries(Array.from({ length: 260 }, (_, i) => [`field${i}`, i]));
+  ctx.setData(data);
+  await ctx.controller.refresh();
+  assert.ok(ctx.controller.online);
+  assert.ok(ctx.controller.customPaths.size > 260);
+  assert.ok(ctx.accessory.services.every(s => s.characteristics.length <= 100));
+  ctx.controller.stop();
+});
+
+test('unknown, missing, and stale data are not falsely mapped to closed/off', async () => {
+  assert.equal(opened('UNKNOWN'), undefined);
+  assert.equal(locked(null), undefined);
+  assert.equal(active('UNKNOWN__'), undefined);
+  assert.equal(celsius({ value: 68, unit: 'FAHRENHEIT' }), 20);
+  const ctx = setup();
+  await ctx.controller.refresh();
+  ctx.controller.data.status.battery.level = null;
+  await assert.rejects(char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest());
+  ctx.controller.lastRead = 0;
+  await assert.rejects(char(ctx, 'charge', hap.Characteristic.On).handleGetRequest());
+  ctx.controller.stop();
+});
+
+test('startup cached accessories are unavailable when discovery cannot run', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  NissanPlatform.prototype.configureAccessory.call({ cached: new Map(), api: ctx.platform.api }, ctx.accessory);
+  await assert.rejects(char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest());
+  await assert.rejects(char(ctx, 'charge', hap.Characteristic.On).handleSetRequest(true));
+  ctx.controller.stop();
+});
+
+test('unlock routes to Nissan once without pretending observed lock state changed', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  await char(ctx, 'lock', hap.Characteristic.LockTargetState).handleSetRequest(0);
+  await ctx.controller.commandPromise;
+  assert.equal(ctx.calls.filter(c => c.method === 'command').length, 1);
+  assert.equal(ctx.calls.find(c => c.method === 'command').args.action, 'unlock');
+  assert.equal(await char(ctx, 'lock', hap.Characteristic.LockCurrentState).handleGetRequest(), 1);
+  assert.equal(ctx.controller.commandState, 'unlock: succeeded');
+  ctx.controller.stop();
+});
+
+test('read-only, feature blocks, and concurrent-command guard prevent writes', async () => {
+  for (const [config, settings] of [[{ readOnly: true }, {}], [{}, { disabledFeatures: ['lock'] }]]) {
+    const ctx = setup(config, settings);
+    assert.throws(() => ctx.controller.enqueue('unlock', {}, 'lock'));
+    assert.equal(ctx.calls.length, 0);
+    ctx.controller.stop();
+  }
+  const ctx = setup();
+  let finish;
+  ctx.setRequest(() => new Promise(resolve => { finish = resolve; }));
+  ctx.controller.enqueue('lock', {}, 'lock');
+  assert.throws(() => ctx.controller.enqueue('unlock', {}, 'lock'));
+  ctx.controller.stop();
+  finish({ complete: true });
+  await ctx.controller.commandPromise;
+});
+
+test('failed submission is recorded, momentary switch resets, and no retry occurs', async () => {
+  const ctx = setup();
+  ctx.setRequest(async () => { throw new Error('Nissan ApiError (HTTP 403)'); });
+  await char(ctx, 'horn', hap.Characteristic.On).handleSetRequest(true);
+  await ctx.controller.commandPromise;
+  assert.equal(ctx.controller.busy, false);
+  assert.equal(ctx.controller.commandFault, true);
+  assert.equal(await char(ctx, 'horn', hap.Characteristic.On).handleGetRequest(), false);
+  assert.equal(ctx.controller.commandState, 'horn: failed or unconfirmed');
+  ctx.controller.stop();
+});
+
+test('climate off setpoint stays local, while running climate sends an adjustment', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  await char(ctx, 'climate', hap.Characteristic.TargetTemperature).handleSetRequest(23);
+  assert.equal(ctx.calls.filter(c => c.method === 'command').length, 0);
+  ctx.controller.data.status.climate.state = 'ON';
+  await char(ctx, 'climate', hap.Characteristic.TargetTemperature).handleSetRequest(24);
+  await ctx.controller.commandPromise;
+  const request = ctx.calls.find(c => c.method === 'command');
+  assert.equal(request.args.action, 'adjust_climate');
+  assert.equal(request.args.params.temperature, 24);
+  ctx.controller.stop();
+});
+
+test('schedule switch maps to its stable Nissan ID', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  await char(ctx, 'charge-schedule-weekday', hap.Characteristic.On).handleSetRequest(false);
+  await ctx.controller.commandPromise;
+  const request = ctx.calls.find(c => c.method === 'command');
+  assert.deepEqual(request.args.params, { id: 'weekday', enabled: false });
+  ctx.controller.stop();
+});
+
+test('only a confirmed missing schedule removes its service', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  const data = snapshot();
+  delete data.charge_schedules;
+  data.errors.charge_schedules = { type: 'ApiError' };
+  ctx.setData(data);
+  await ctx.controller.refresh();
+  assert.ok(ctx.accessory.services.find(s => s.subtype === 'nissan:charge-schedule-weekday'));
+  data.charge_schedules = [];
+  delete data.errors.charge_schedules;
+  await ctx.controller.refresh();
+  assert.equal(ctx.accessory.services.find(s => s.subtype === 'nissan:charge-schedule-weekday'), undefined);
+  ctx.controller.stop();
+});
+
+test('asynchronous Nissan failure is never treated as successful completion', async () => {
+  const ctx = setup();
+  let polls = 0;
+  ctx.setRequest(async method => {
+    if (method === 'command') return { complete: false, request: { id: 'request', kind: 'DOOR' } };
+    if (method === 'command_status') { polls++; return { terminal: true, success: false, status: 'FAILED' }; }
+    throw new Error('Unexpected refresh after failure');
+  });
+  ctx.controller.enqueue('unlock', {}, 'lock');
+  await ctx.controller.commandPromise;
+  assert.equal(polls, 1);
+  assert.equal(ctx.controller.commandFault, true);
+  assert.equal(ctx.controller.commandState, 'unlock: failed or unconfirmed');
+  ctx.controller.stop();
+});
+
+test('maintenance exposes next odometer/date and distinguishes date versus mileage due', async () => {
+  const ctx = setup();
+  const data = snapshot();
+  data.maintenance = { next_service_mileage: 15000, remaining_service_mileage: 1200, next_service_date: '2099-01-01', mileage_unit: 'MILE', remaining_service_months: 1 };
+  ctx.setData(data);
+  await ctx.controller.refresh();
+  const service = ctx.accessory.services.find(s => s.subtype === 'nissan:maintenance');
+  assert.ok(ctx.controller.primary.linkedServices.includes(service));
+  const odometer = service.characteristics.find(c => c.displayName === 'Next Service Odometer');
+  assert.equal(await odometer.handleGetRequest(), 15000);
+  assert.equal(maintenanceStatus(data.maintenance, new Date(2026, 9, 26)), 'Upcoming');
+  assert.equal(maintenanceStatus({ ...data.maintenance, remaining_service_mileage: 0 }, new Date(2026, 9, 26)), 'Due by mileage');
+  assert.equal(maintenanceStatus({ ...data.maintenance, next_service_date: '2026-10-26' }, new Date(2026, 9, 26)), 'Due by date');
+  // Zero remaining months can be a rounded value, not proof the due date has passed.
+  assert.equal(maintenanceStatus({ ...data.maintenance, remaining_service_months: 0 }, new Date(2026, 9, 26)), 'Upcoming');
+  assert.equal(maintenanceStatus(null), undefined);
+  delete data.maintenance;
+  data.errors.maintenance = { type: 'ApiError' };
+  await ctx.controller.refresh();
+  await assert.rejects(odometer.handleGetRequest());
+  assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 92);
+  ctx.controller.stop();
+});
+
+test('charge feature evidence separates unknown, absent, and reported values', () => {
+  assert.equal(chargeSettingEvidence(null, 'charge_limit_percent'), 'Not checked');
+  assert.match(chargeSettingEvidence({ errors: { charge_config: {} } }, 'charge_limit_percent'), /Unknown/);
+  assert.match(chargeSettingEvidence({ charge_config: null }, 'charge_limit_percent'), /Not reported/);
+  assert.match(chargeSettingEvidence({ charge_config: { charge_limit_percent: 80 } }, 'charge_limit_percent'), /Reported: 80%.*not yet verified/);
+});
+
+test('eligibility distinguishes explicit false, unknown subscription, and failed query', () => {
+  const data = { capabilities: { services: [{ type: 'REMOTE_CHARGING', enabled: true, subscribed: null }] } };
+  assert.match(serviceEvidence(data, 'REMOTE_CHARGING'), /Enabled: yes; subscribed: unknown/);
+  data.capabilities.services[0].enabled = false;
+  assert.match(serviceEvidence(data, 'REMOTE_CHARGING'), /Enabled: no/);
+  assert.match(serviceEvidence(data, 'REMOTE_DOOR_UNLOCK'), /Not reported/);
+  data.errors = { capabilities: { type: 'ApiError' } };
+  assert.match(serviceEvidence(data, 'REMOTE_CHARGING'), /query failed/);
+  assert.match(maintenanceEvidence({ maintenance: null }), /no maintenance timeline/);
+  assert.match(maintenanceEvidence({ errors: { maintenance: {} } }), /query failed/);
+});
+
+test('missing charge settings cannot leave a working stale slider', async () => {
+  const ctx = setup();
+  await ctx.controller.refresh();
+  const slider = ctx.controller.details.characteristics.find(c => c.displayName === 'Charge Limit Percent');
+  assert.ok(slider);
+  const data = snapshot();
+  delete data.charge_config;
+  data.errors.charge_config = { type: 'ApiError' };
+  ctx.setData(data);
+  await ctx.controller.refresh();
+  await assert.rejects(slider.handleSetRequest(70));
+  assert.equal(ctx.calls.filter(c => c.method === 'command').length, 0);
+  data.charge_config = null;
+  delete data.errors.charge_config;
+  await ctx.controller.refresh();
+  assert.equal(ctx.controller.details.characteristics.find(c => c.UUID === slider.UUID), undefined);
+  ctx.controller.stop();
+});

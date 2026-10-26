@@ -1,0 +1,34 @@
+<style>
+  .nissan-setup { max-width: 680px; margin: 0 auto 24px; }
+  .nissan-setup .status { border-left: 4px solid var(--bs-secondary, #777); padding: 12px 16px; margin-bottom: 20px; background: rgba(127,127,127,.07); }
+  .nissan-setup .status[data-state="connected"] { border-left-color: #198754; }
+  .nissan-setup .status[data-state="error"] { border-left-color: #c73d4b; }
+  .nissan-setup .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .nissan-setup small { display: block; margin-top: 8px; }
+  .nissan-setup button { min-height: 40px; }
+</style>
+<section class="nissan-setup" aria-labelledby="nissan-title">
+  <h3 id="nissan-title">Connect to MyNISSAN</h3>
+  <p>Sign in to your U.S. account to connect your Ariya.</p>
+  <div id="nissan-status" class="status" role="status" aria-live="polite">
+    <strong id="nissan-status-title">Checking setup...</strong>
+    <div id="nissan-status-detail"></div>
+  </div>
+  <form id="nissan-signin">
+    <div class="mb-3 form-group">
+      <label for="nissan-email">MyNISSAN email</label>
+      <input id="nissan-email" name="username" type="email" class="form-control" autocomplete="username" required maxlength="320">
+    </div>
+    <div class="mb-3 form-group">
+      <label for="nissan-password">Password</label>
+      <input id="nissan-password" name="password" type="password" class="form-control" autocomplete="current-password" required maxlength="4096" aria-describedby="nissan-password-note">
+      <small id="nissan-password-note" class="text-muted">The plugin saves renewable sign-in tokens on your Homebridge host. Your password is not saved in plugin settings.</small>
+    </div>
+    <div class="actions">
+      <button id="nissan-connect" class="btn btn-primary" type="submit">Sign in</button>
+      <button id="nissan-check" class="btn btn-outline-secondary" type="button">Check connection</button>
+    </div>
+  </form>
+  <p class="mt-3"><small class="text-muted">To reconnect, sign in again here. Save settings and restart Homebridge after first setup or when changing paths.</small></p>
+</section>
+<script src="app.js"></script>
