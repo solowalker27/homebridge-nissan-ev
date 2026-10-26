@@ -7,7 +7,8 @@ VIN. Renaming it does not replace the accessory or break its service identities.
 This is an unofficial integration using [pynissan](https://github.com/bvdcode/nissan-connect-sdk)
 0.2.1. It runs a private Python subprocess over stdin/stdout; it does not expose
 an HTTP server. Tested with Homebridge 2.4's real HAP service classes. Requires
-Node 22, 24, or 26 and Python 3.12+ on the **Homebridge host**.
+Node 22, 24, or 26 on a 64-bit Linux or macOS Homebridge host. **No preinstalled
+Python or terminal setup is required.**
 
 Tested with a U.S. 2023 Ariya. Support for other Nissan EV models or markets has
 not been verified; vehicle discovery currently selects Ariyas. This project is
@@ -55,86 +56,69 @@ HomeKit services in this plugin. It does not add features absent from the car or
 subscription. In particular, a library method for charge limits or V2L does not
 prove a 2023 Ariya supports it.
 
-## Install on your existing Homebridge host
+## Install in Homebridge UI
 
-For the official Debian **UTM appliance**, follow [the UTM installation guide](docs/INSTALL-UTM.md).
-It uses `sudo hb-shell` and the appliance's local plugin directory instead of a
-global npm install, and includes a private Python runtime for Debian 12.
+1. In **Plugins**, search for **homebridge-nissan-ev** and install it.
+2. Restart Homebridge if prompted, then open the plugin's **Settings**.
+3. Wait for automatic connection setup. The plugin downloads a private Python
+   runtime and installs the pinned Nissan client plus its dependencies. Progress
+   appears in the settings screen. First setup may take a few minutes.
+4. Enter your U.S. MyNISSAN email and password and select **Sign in**.
+5. Save settings and restart Homebridge after initial setup. Your Ariya is
+   discovered automatically. Vehicle names and options are below the sign-in form.
 
-1. Search for **homebridge-nissan-ev** in Homebridge UI's plugin installer.
-   Alternatively, install with your Homebridge installation's package manager:
+**No SSH, terminal commands, Python installation, or executable-path configuration
+is needed.** This also applies to the official Homebridge UTM appliance; see
+[the UTM guide](docs/INSTALL-UTM.md).
 
-   ```sh
-   npm install -g homebridge-nissan-ev
-   ```
+The plugin supports 64-bit Linux and macOS on Intel/AMD (`x64`) or ARM (`arm64`).
+Homebridge needs internet access to download its private runtime from Astral's
+GitHub releases and Python packages from PyPI/files.pythonhosted.org. Downloads
+of the connection helper are version-pinned and SHA-256 verified before use.
+The helper installs Python 3.13 and `pynissan==0.2.1`, including `aiohttp` and its
+transitive dependencies, under `nissan-connect` in Homebridge storage. Setup
+coordinates across the UI and running plugin, reuses a healthy runtime, and does
+not require administrator privileges or change system Python/shell profiles.
+It works even when npm lifecycle scripts are disabled.
 
-   On the official UTM/Debian appliance, use `sudo hb-shell` and a local
-   installation instead; see the guide linked above. Development builds can be
-   installed with `npm install` followed by the path to an `npm pack` tarball.
+If setup fails because a download is unavailable, the UI explains which step
+failed. Use **Check connection** to retry once connectivity is restored. An
+existing outdated `python3` setting automatically falls back to the private
+runtime; a compatible custom Python environment remains usable.
 
-2. Create a Python environment **as the OS user running
-   Homebridge**, so it owns and can update the token file. The following paths
-   are examples for a Linux installation whose storage is `/var/lib/homebridge`.
-   Adjust them for your installation. Use an installed Python 3.12 or newer;
-   older Raspberry Pi images may need a newer Python installed first.
+The UI creates the platform configuration for you. A minimal manual entry is:
 
-   ```sh
-   PLUGIN_DIR="$(npm root -g)/homebridge-nissan-ev"
-   NISSAN_DATA=/var/lib/homebridge/nissan-connect
-   mkdir -p "$NISSAN_DATA"
-   chmod 700 "$NISSAN_DATA"
-   python3.13 -m venv "$NISSAN_DATA/venv"
-   "$NISSAN_DATA/venv/bin/python" -m pip install -r "$PLUGIN_DIR/requirements.txt"
-   ```
+```json
+{
+  "platform": "NissanConnect",
+  "name": "Nissan EV",
+  "readOnly": true
+}
+```
 
-   Python and the package requirements must be available before UI sign-in.
+`readOnly: true` blocks vehicle commands while retaining status. Set it to false
+when ready to use remote actions; vehicle support and Nissan entitlement still
+apply. Names and per-vehicle overrides can be set with:
 
-3. Restart Homebridge after installing the plugin. Open **Plugins → Nissan
-   Connect → Settings**, enter your MyNISSAN email and password, and select
-   **Sign in**. The settings screen detects a private runtime at
-   `nissan-connect/venv/bin/python` within Homebridge storage. If using another
-   runtime, enter its absolute path in **Python executable** below the sign-in
-   form, then retry. Successful sign-in verifies account access and shows any
-   Ariyas found, with only the final four VIN characters. Save settings and restart
-   Homebridge after first setup. Vehicle names and other options remain below
-   the sign-in form.
+```json
+{
+  "vehicles": [
+    { "vin": "YOUR_17_DIGIT_VIN", "name": "My Ariya", "enabled": true }
+  ]
+}
+```
 
-   To configure manually instead, merge
-   this entry into your existing `platforms` array:
+`vehicles` is optional; all Ariyas in the account are discovered otherwise.
+`disabledFeatures` on a vehicle can block `lock`, `charge`, `climate`, `lights`,
+`horn`, `refresh`, `wake`, `location`, `schedules`, or `chargeSettings`. Blocking
+retains status services but rejects the corresponding writes. Disabling a vehicle
+removes it on discovery after restart.
 
-   ```json
-   {
-     "platform": "NissanConnect",
-     "name": "Nissan Connect",
-     "pythonPath": "/var/lib/homebridge/nissan-connect/venv/bin/python",
-     "authFile": "/var/lib/homebridge/nissan-connect/auth.json",
-     "pollInterval": 300,
-     "staleAfter": 900,
-     "lowBatteryThreshold": 20,
-     "includeLocation": true,
-     "readOnly": false,
-     "vehicles": [
-       {
-         "vin": "YOUR_17_DIGIT_VIN",
-         "name": "My Ariya",
-         "enabled": true
-       }
-     ]
-   }
-   ```
+Use the existing bridge pairing in Apple Home. If you choose a separate child
+bridge, pair that child bridge's HomeKit QR code. This plugin publishes HomeKit
+accessories and does not require a Homebridge Matter beta.
 
-   `vehicles` is optional: otherwise all Ariyas in the account are discovered.
-   `readOnly: true` blocks vehicle commands while retaining status services.
-   `disabledFeatures` on a vehicle can block any of `lock`, `charge`, `climate`,
-   `lights`, `horn`, `refresh`, `wake`, `location`, `schedules`, `chargeSettings`.
-   Blocking a family retains its status services but rejects its remote writes.
-   An explicitly disabled vehicle is removed on discovery after restart.
-
-4. Restart Homebridge. Use its existing bridge pairing in Apple Home. No separate
-   pairing code is created for each service. Only one plugin instance should use
-   a token file, to prevent concurrent token refreshes from different processes.
-
-## Sign-in and reauthentication in Homebridge UI (0.2.0)
+## Sign-in and reauthentication in Homebridge UI
 
 Open the plugin's settings and use **Sign in** or **Sign in again**. The password
 is sent through Homebridge UI to a private Python pipe, then to Nissan. It is not
@@ -143,9 +127,15 @@ file. The password field is cleared when submitted, including on failure. The
 plugin stores renewable tokens in an owner-only (`0600`) auth file on the
 Homebridge host. Treat normal Homebridge storage backups as private.
 
+The password field supports clipboard paste, including Safari's text clipboard
+format. Use **Show** to check the entered value, or **Hide** to conceal it again.
+Background status and connection checks preserve anything you have typed or
+pasted. Submitting sign-in clears and conceals the field immediately.
+
 **Saved sign-in found** only means a local token file exists; select **Check
-connection** for a read-only account check. Opening settings does not contact
-Nissan. No sign-in or connection check sends vehicle commands. If Nissan rejects
+connection** for a read-only account check. Opening settings may prepare local
+dependencies but does not contact Nissan. No sign-in or connection check sends
+vehicle commands. If Nissan rejects
 a new sign-in or account verification fails, the existing token file is retained.
 The settings screen shows fixed error guidance without raw upstream responses.
 
@@ -249,8 +239,8 @@ status. Both start and stop charging were accepted for processing, then returned
 FAILED; status confirmed the stop request did not end the active charging session.
 Other remote commands have not been verified against that vehicle.
 
-- Adapter stopped: check Python 3.12+, `pynissan==0.2.1`, absolute paths, auth file
-  ownership and `0600` permissions. Run the helper directly if Python cannot start.
+- Adapter stopped: reopen plugin settings to check/repair its private runtime.
+  Check Homebridge storage ownership, available disk space, and internet access.
 - HTTP 401: reauthenticate locally after verifying official-app login.
 - HTTP 403: Nissan may require device verification or additional entitlement.
   The helper supports an optional `request_proof` object in the private auth file

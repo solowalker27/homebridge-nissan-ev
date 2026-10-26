@@ -8,7 +8,7 @@
     "type": "object",
     "properties": {
       "name": { "title": "Platform label", "type": "string", "default": "Nissan EV" },
-      "pythonPath": { "title": "Python executable (3.12+ with pynissan installed)", "type": "string", "description": "Setup detects the private runtime under Homebridge storage when available, otherwise uses python3.", "required": true },
+      "pythonPath": { "title": "Python executable override (advanced, optional)", "type": "string", "description": "Leave blank for automatic setup. The plugin downloads a private runtime and dependencies inside Homebridge storage; system Python is not changed." },
       "authFile": { "title": "Absolute path to token file", "type": "string", "description": "Defaults to nissan-connect/auth.json inside Homebridge storage. File must be owned by the Homebridge user and readable only by that user." },
       "pollInterval": { "title": "Cached status polling interval (seconds)", "type": "integer", "default": 300, "minimum": 60 },
       "staleAfter": { "title": "Mark unavailable after no successful API read (seconds)", "type": "integer", "default": 900, "minimum": 120 },

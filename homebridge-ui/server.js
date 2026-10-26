@@ -7,7 +7,9 @@ async function main() {
   class NissanUiServer extends HomebridgePluginUiServer {
     constructor() {
       super();
-      const auth = new AuthUi(this.homebridgeStoragePath);
+      const auth = new AuthUi(this.homebridgeStoragePath, {
+        onProgress: progress => this.pushEvent('runtime-progress', progress),
+      });
       for (const action of ['status', 'login', 'check']) {
         this.onRequest(`/auth/${action}`, async payload => {
           try { return await auth.request(action, payload); }
