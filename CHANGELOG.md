@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0
+## 0.3.0
 
 - Replace pynissan and the Python subprocess with the native TypeScript SDK in
   [nissan-connect-sdk-ts](https://github.com/solowalker27/nissan-connect-sdk-ts),
@@ -11,16 +11,9 @@
   password paste support. Serialize UI/plugin token updates with a shared lock.
 - Abort timed-out native sessions and cancel queued writes; subsequent reads can
   reconnect without replaying an abandoned command.
-
-
-## 0.3.0
-
-- Automatically download and provision a private Python runtime and all Nissan dependencies on first use; no terminal configuration is required.
-- Show setup progress in Homebridge UI and recover from an old system Python setting.
-- Share a setup lock across the UI and running platform; verify helper downloads before execution.
 - Handle password paste inside the setup iframe, including Safari's text clipboard format.
 - Add an accessible Show/Hide password button.
-- Preserve entered passwords during background setup and connection checks.
+- Preserve entered passwords during background status and connection checks.
 - Capture sign-in credentials before asynchronous settings reads; clear and conceal the submitted password immediately.
 
 ## 0.2.0
