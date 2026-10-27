@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Use the vehicle name directly for the primary lock service, preventing repeated
+  "Doors" suffixes from feeding back into every linked service name.
+- Save individual service names and preserve them through status polling,
+  Homebridge restarts and vehicle renames, including optional and custom services.
+- Repair recognizable generated "Doors Doors" names on upgrade and retain surviving
+  cached custom names without changing accessory or service identities.
+- Keep service Name, ConfiguredName and accessory information names consistent.
+
 ## 0.3.0
 
 - Replace pynissan and the Python subprocess with the native TypeScript SDK in

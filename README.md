@@ -147,6 +147,17 @@ packaged `homebridge-ui` uses the official `@homebridge/plugin-ui-utils` API.
 - A controller supporting custom characteristics can write **Vehicle Name** to
   rename the plugin accessory immediately, without restarting.
 
+The primary lock uses the vehicle name directly, such as **Ariya**. Other services
+use names such as **Ariya Charging** and **Ariya Charge Cable**. The plugin saves
+individual service renames through `ConfiguredName` and preserves them across
+status refreshes, restarts and vehicle renames. Renaming the vehicle updates only
+services that still use automatically generated names. Set a service back to its
+current default name to resume automatic naming for that service.
+
+Version 0.3.1 repairs recognizable duplicated "Doors" prefixes on upgrade and
+retains custom names still present in the accessory cache. Custom names already
+overwritten by an earlier version need to be entered again once.
+
 Apple Home may retain names it has already cached or names you edited in Home;
 change those in Home as well. This is a HomeKit name, not a request to rename the
 vehicle in Nissan's account. The plugin never uses the name as an identifier.

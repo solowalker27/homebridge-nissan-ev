@@ -269,3 +269,92 @@ test('missing charge settings cannot leave a working stale slider', async () => 
   assert.equal(ctx.controller.details.characteristics.find(c => c.UUID === slider.UUID), undefined);
   ctx.controller.stop();
 });
+
+test('primary renames do not add Doors to the vehicle name or any linked service', async () => {
+  const ctx = setup({}, { name: 'Bluebird' });
+  await ctx.controller.refresh();
+  const primary = char(ctx, 'lock', hap.Characteristic.ConfiguredName);
+  assert.equal(await primary.handleGetRequest(), 'Bluebird');
+  await primary.handleSetRequest('Roadrunner');
+  await primary.handleSetRequest(await primary.handleGetRequest());
+  await ctx.controller.refresh();
+  assert.equal(ctx.controller.name, 'Roadrunner');
+  assert.equal(await primary.handleGetRequest(), 'Roadrunner');
+  assert.equal(ctx.accessory.getService(hap.Service.AccessoryInformation).getCharacteristic(hap.Characteristic.Name).value, 'Roadrunner');
+  assert.equal(char(ctx, 'charge', hap.Characteristic.Name).value, 'Roadrunner Charging');
+  assert.ok(ctx.accessory.services.every(service => !service.displayName.includes('Doors Doors')));
+  assert.ok(ctx.calls.every(call => call.method === 'snapshot'));
+  ctx.controller.stop();
+});
+
+test('individual core, optional and custom service names survive refresh, restart and vehicle renames', async () => {
+  const ctx = setup({}, { name: 'Bluebird' });
+  await ctx.controller.refresh();
+  const names = {
+    charge: 'Plug Me In', 'front_left-ajar': 'Driver Door',
+    'charge-schedule-weekday': 'Night Charging', steering_wheel_heater: 'Warm Wheel',
+    'seat-front_driver-HEAT': 'Driver Seat Heat', telemetry: 'Car Details',
+    maintenance: 'Service Reminder', 'telemetry-0': 'Car Readings',
+  };
+  for (const [key, name] of Object.entries(names)) await char(ctx, key, hap.Characteristic.ConfiguredName).handleSetRequest(name);
+  for (let i = 0; i < 2; i++) await ctx.controller.refresh();
+  for (const [key, name] of Object.entries(names)) {
+    assert.equal(char(ctx, key, hap.Characteristic.Name).value, name, key);
+    assert.equal(await char(ctx, key, hap.Characteristic.ConfiguredName).handleGetRequest(), name, key);
+  }
+  const ids = ctx.accessory.services.map(service => service.getServiceId());
+  ctx.controller.stop();
+  const restored = PlatformAccessory.deserialize(PlatformAccessory.serialize(ctx.accessory));
+  const next = setup({}, { name: 'Bluebird' }, restored);
+  await next.controller.refresh();
+  next.controller.rename('Roadrunner');
+  await next.controller.refresh();
+  for (const [key, name] of Object.entries(names)) {
+    assert.equal(char(next, key, hap.Characteristic.Name).value, name, key);
+    assert.equal(await char(next, key, hap.Characteristic.ConfiguredName).handleGetRequest(), name, key);
+  }
+  assert.equal(char(next, 'battery', hap.Characteristic.Name).value, 'Roadrunner Battery');
+  assert.deepEqual(next.accessory.services.map(service => service.getServiceId()), ids);
+  next.controller.stop();
+});
+
+test('upgrade repairs legacy Doors prefixes and preserves cached service renames before optional data returns', async () => {
+  const accessory = new PlatformAccessory('Bluebird Doors Doors', hap.uuid.generate(`homebridge-nissan-connect:${vin}`));
+  accessory.context = { vin, vehicleName: 'Bluebird Doors Doors', configuredName: 'Bluebird' };
+  const lock = accessory.addService(hap.Service.LockMechanism, 'Bluebird Doors Doors Doors', 'nissan:lock');
+  lock.addOptionalCharacteristic(hap.Characteristic.ConfiguredName);
+  lock.updateCharacteristic(hap.Characteristic.ConfiguredName, lock.displayName);
+  const door = accessory.addService(hap.Service.ContactSensor, 'Bluebird Doors Doors front left Door', 'nissan:front_left-ajar');
+  door.addOptionalCharacteristic(hap.Characteristic.ConfiguredName);
+  door.updateCharacteristic(hap.Characteristic.ConfiguredName, 'Driver Entry');
+  const charge = accessory.addService(hap.Service.Outlet, 'Bluebird Doors Doors Charging', 'nissan:charge');
+  charge.addOptionalCharacteristic(hap.Characteristic.ConfiguredName);
+  charge.updateCharacteristic(hap.Characteristic.ConfiguredName, charge.displayName);
+  const doorId = door.getServiceId();
+  const ctx = setup({}, { name: 'Bluebird' }, accessory);
+  assert.equal(ctx.controller.name, 'Bluebird');
+  assert.equal(char(ctx, 'lock', hap.Characteristic.Name).value, 'Bluebird');
+  assert.equal(char(ctx, 'charge', hap.Characteristic.Name).value, 'Bluebird Charging');
+  assert.equal(await char(ctx, 'front_left-ajar', hap.Characteristic.ConfiguredName).handleGetRequest(), 'Driver Entry');
+  await char(ctx, 'front_left-ajar', hap.Characteristic.ConfiguredName).handleSetRequest('My Door');
+  await ctx.controller.refresh();
+  assert.equal(char(ctx, 'front_left-ajar', hap.Characteristic.Name).value, 'My Door');
+  assert.equal(ctx.accessory.services.find(service => service.subtype === 'nissan:front_left-ajar').getServiceId(), doorId);
+  assert.ok(ctx.accessory.services.every(service => !service.displayName.includes('Doors Doors')));
+  ctx.controller.stop();
+});
+
+test('explicit vehicle names are preserved and resetting a service to its default resumes automatic naming', async () => {
+  const ctx = setup({}, { name: 'Garage Doors Doors' });
+  await ctx.controller.refresh();
+  assert.equal(ctx.controller.name, 'Garage Doors Doors');
+  const configured = char(ctx, 'charge', hap.Characteristic.ConfiguredName);
+  await configured.handleSetRequest('My Charger');
+  await assert.rejects(configured.handleSetRequest('   '));
+  assert.equal(await configured.handleGetRequest(), 'My Charger');
+  await configured.handleSetRequest('Garage Doors Doors Charging');
+  ctx.controller.rename('Roadrunner');
+  await ctx.controller.refresh();
+  assert.equal(await configured.handleGetRequest(), 'Roadrunner Charging');
+  ctx.controller.stop();
+});
