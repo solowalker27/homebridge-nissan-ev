@@ -7,27 +7,89 @@
   "schema": {
     "type": "object",
     "properties": {
-      "name": { "title": "Platform label", "type": "string", "default": "Nissan EV" },
-      "pythonPath": { "title": "Python executable override (advanced, optional)", "type": "string", "description": "Leave blank for automatic setup. The plugin downloads a private runtime and dependencies inside Homebridge storage; system Python is not changed." },
-      "authFile": { "title": "Absolute path to token file", "type": "string", "description": "Defaults to nissan-connect/auth.json inside Homebridge storage. File must be owned by the Homebridge user and readable only by that user." },
-      "pollInterval": { "title": "Cached status polling interval (seconds)", "type": "integer", "default": 300, "minimum": 60 },
-      "staleAfter": { "title": "Mark unavailable after no successful API read (seconds)", "type": "integer", "default": 900, "minimum": 120 },
-      "lowBatteryThreshold": { "title": "Low battery threshold (%)", "type": "integer", "default": 20, "minimum": 0, "maximum": 100 },
-      "includeLocation": { "title": "Expose location and Locate Vehicle command", "type": "boolean", "default": true },
-      "readOnly": { "title": "Block all remote commands", "type": "boolean", "default": false },
+      "name": {
+        "title": "Platform label",
+        "type": "string",
+        "default": "Nissan EV"
+      },
+      "authFile": {
+        "title": "Absolute path to token file",
+        "type": "string",
+        "description": "Defaults to nissan-connect/auth.json inside Homebridge storage. File must be owned by the Homebridge user and readable only by that user."
+      },
+      "pollInterval": {
+        "title": "Cached status polling interval (seconds)",
+        "type": "integer",
+        "default": 300,
+        "minimum": 60
+      },
+      "staleAfter": {
+        "title": "Mark unavailable after no successful API read (seconds)",
+        "type": "integer",
+        "default": 900,
+        "minimum": 120
+      },
+      "lowBatteryThreshold": {
+        "title": "Low battery threshold (%)",
+        "type": "integer",
+        "default": 20,
+        "minimum": 0,
+        "maximum": 100
+      },
+      "includeLocation": {
+        "title": "Expose location and Locate Vehicle command",
+        "type": "boolean",
+        "default": true
+      },
+      "readOnly": {
+        "title": "Block all remote commands",
+        "type": "boolean",
+        "default": false
+      },
       "vehicles": {
         "title": "Vehicle names and overrides (optional)",
         "type": "array",
         "items": {
           "type": "object",
           "properties": {
-            "vin": { "title": "VIN", "type": "string", "minLength": 17, "maxLength": 17, "required": true },
-            "name": { "title": "Vehicle name", "type": "string", "minLength": 1, "maxLength": 64, "description": "Change this and restart Homebridge to rename without changing accessory identity. Apple Home may retain its own name; edit that in Home." },
-            "enabled": { "title": "Expose vehicle", "type": "boolean", "default": true },
+            "vin": {
+              "title": "VIN",
+              "type": "string",
+              "minLength": 17,
+              "maxLength": 17,
+              "required": true
+            },
+            "name": {
+              "title": "Vehicle name",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Change this and restart Homebridge to rename without changing accessory identity. Apple Home may retain its own name; edit that in Home."
+            },
+            "enabled": {
+              "title": "Expose vehicle",
+              "type": "boolean",
+              "default": true
+            },
             "disabledFeatures": {
               "title": "Block selected command families",
-              "type": "array", "uniqueItems": true,
-              "items": { "type": "string", "enum": ["lock", "charge", "climate", "lights", "horn", "refresh", "wake", "location", "schedules", "chargeSettings"] }
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "lock",
+                  "charge",
+                  "climate",
+                  "lights",
+                  "horn",
+                  "refresh",
+                  "wake",
+                  "location",
+                  "schedules",
+                  "chargeSettings"
+                ]
+              }
             }
           }
         }

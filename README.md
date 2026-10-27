@@ -4,11 +4,12 @@ A Homebridge dynamic platform for a **US MyNISSAN account and Nissan Ariya**.
 Each vehicle is **one HomeKit accessory containing linked services**, identified by
 VIN. Renaming it does not replace the accessory or break its service identities.
 
-This is an unofficial integration using [pynissan](https://github.com/bvdcode/nissan-connect-sdk)
-0.2.1. It runs a private Python subprocess over stdin/stdout; it does not expose
-an HTTP server. Tested with Homebridge 2.4's real HAP service classes. Requires
-Node 22, 24, or 26 on a 64-bit Linux or macOS Homebridge host. **No preinstalled
-Python or terminal setup is required.**
+This is an unofficial integration using [our TypeScript SDK](https://github.com/solowalker27/nissan-connect-sdk-ts),
+an auto-generated translation of [pynissan](https://github.com/bvdcode/nissan-connect-sdk)
+by Vadim Belov. It runs directly in Node.js with no Python environment, compiler,
+subprocess, runtime download or installation scripts. Tested with Homebridge 2.4's
+real HAP service classes. Requires Node 22, 24 or 26. **Install and sign in directly
+through Homebridge UI; no terminal setup is required.**
 
 Tested with a U.S. 2023 Ariya. Support for other Nissan EV models or markets has
 not been verified; vehicle discovery currently selects Ariyas. This project is
@@ -60,31 +61,21 @@ prove a 2023 Ariya supports it.
 
 1. In **Plugins**, search for **homebridge-nissan-ev** and install it.
 2. Restart Homebridge if prompted, then open the plugin's **Settings**.
-3. Wait for automatic connection setup. The plugin downloads a private Python
-   runtime and installs the pinned Nissan client plus its dependencies. Progress
-   appears in the settings screen. First setup may take a few minutes.
-4. Enter your U.S. MyNISSAN email and password and select **Sign in**.
-5. Save settings and restart Homebridge after initial setup. Your Ariya is
+3. Enter your U.S. MyNISSAN email and password and select **Sign in**.
+4. Save settings and restart Homebridge after initial setup. Your Ariya is
    discovered automatically. Vehicle names and options are below the sign-in form.
 
 **No SSH, terminal commands, Python installation, or executable-path configuration
 is needed.** This also applies to the official Homebridge UTM appliance; see
-[the UTM guide](docs/INSTALL-UTM.md).
+[the UTM guide](docs/INSTALL-UTM.md). The SDK's compiled JavaScript is included in its
+pinned GitHub dependency. npm downloads it as part of normal plugin installation;
+no build tools or npm lifecycle scripts are needed. Installation needs access to
+npm and GitHub; runtime vehicle access needs Nissan's services.
 
-The plugin supports 64-bit Linux and macOS on Intel/AMD (`x64`) or ARM (`arm64`).
-Homebridge needs internet access to download its private runtime from Astral's
-GitHub releases and Python packages from PyPI/files.pythonhosted.org. Downloads
-of the connection helper are version-pinned and SHA-256 verified before use.
-The helper installs Python 3.13 and `pynissan==0.2.1`, including `aiohttp` and its
-transitive dependencies, under `nissan-connect` in Homebridge storage. Setup
-coordinates across the UI and running plugin, reuses a healthy runtime, and does
-not require administrator privileges or change system Python/shell profiles.
-It works even when npm lifecycle scripts are disabled.
-
-If setup fails because a download is unavailable, the UI explains which step
-failed. Use **Check connection** to retry once connectivity is restored. An
-existing outdated `python3` setting automatically falls back to the private
-runtime; a compatible custom Python environment remains usable.
+Existing owner-only token files remain compatible. Legacy `pythonPath` settings
+are ignored and removed from configuration when you open and save the settings UI.
+Any old managed Python environment is no longer used; upgrades leave its files in
+place so existing Homebridge storage is not deleted automatically.
 
 The UI creates the platform configuration for you. A minimal manual entry is:
 
@@ -121,7 +112,7 @@ accessories and does not require a Homebridge Matter beta.
 ## Sign-in and reauthentication in Homebridge UI
 
 Open the plugin's settings and use **Sign in** or **Sign in again**. The password
-is sent through Homebridge UI to a private Python pipe, then to Nissan. It is not
+is sent through Homebridge UI to the native Node client, then to Nissan. It is not
 written into `config.json`, process arguments, diagnostic output, or the token
 file. The password field is cleared when submitted, including on failure. The
 plugin stores renewable tokens in an owner-only (`0600`) auth file on the
@@ -133,8 +124,8 @@ Background status and connection checks preserve anything you have typed or
 pasted. Submitting sign-in clears and conceals the field immediately.
 
 **Saved sign-in found** only means a local token file exists; select **Check
-connection** for a read-only account check. Opening settings may prepare local
-dependencies but does not contact Nissan. No sign-in or connection check sends
+connection** for a read-only account check. Opening settings checks the saved
+file without contacting Nissan. No sign-in or connection check sends
 vehicle commands. If Nissan rejects
 a new sign-in or account verification fails, the existing token file is retained.
 The settings screen shows fixed error guidance without raw upstream responses.
@@ -145,16 +136,8 @@ used on its next request. If a status poll is holding the lock, the UI may ask
 you to wait and try again. There are no automatic login retries. Initial setup,
 path changes, or changing platform options still require Save and restart.
 
-The terminal fallback remains available:
-
-```sh
-"$NISSAN_DATA/venv/bin/python" "$PLUGIN_DIR/python/nissan_bridge.py" \
-  --setup --auth-file "$NISSAN_DATA/auth.json"
-```
-
-Run as the Homebridge service account. On macOS, `--dialogs` uses local credential
-dialogs. UI login requires Homebridge Config UI X with custom plugin UI support;
-the packaged `homebridge-ui` uses the official `@homebridge/plugin-ui-utils` API.
+UI login requires Homebridge Config UI X with custom plugin UI support; the
+packaged `homebridge-ui` uses the official `@homebridge/plugin-ui-utils` API.
 
 ## Rename at any time
 
@@ -229,7 +212,7 @@ Celsius. Read back Nissan's schedule data to verify timezone/DST interpretation.
 
 ## Validation and troubleshooting
 
-The initial read-only probe successfully authenticated, found a U.S. 2023
+The original Python-based read-only probe successfully authenticated, found a U.S. 2023
 Ariya, read battery status, refreshed tokens, and read again. Plugin tests use
 real Homebridge/HAP service objects and simulated Nissan responses, including
 failed commands, null telemetry, renaming/restarts, and token persistence.
@@ -237,10 +220,12 @@ The plugin has not yet been verified against a deployed Homebridge instance. Sep
 live API tests successfully read battery percentage and plugged-in/charging
 status. Both start and stop charging were accepted for processing, then returned
 FAILED; status confirmed the stop request did not end the active charging session.
-Other remote commands have not been verified against that vehicle.
+Other remote commands have not been verified against that vehicle. The TypeScript
+port is verified against translated upstream tests and synthetic responses; it has
+not yet been tested with a new live sign-in or vehicle command.
 
-- Adapter stopped: reopen plugin settings to check/repair its private runtime.
-  Check Homebridge storage ownership, available disk space, and internet access.
+- Connection error: use **Check connection** in plugin settings. Check Homebridge
+  storage ownership and internet access; sign in again if Nissan rejects the session.
 - HTTP 401: reauthenticate locally after verifying official-app login.
 - HTTP 403: Nissan may require device verification or additional entitlement.
   The helper supports an optional `request_proof` object in the private auth file
@@ -256,11 +241,8 @@ To develop from source:
 
 ```sh
 npm ci --ignore-scripts
-python3.13 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
 npm test
 npm run check
-.venv/bin/python -m unittest discover -s test -p 'test_*.py'
 npm pack
 ```
 
@@ -292,7 +274,7 @@ used as an unverified substitute.
 
 Maintenance is a custom service: Apple Home has no native odometer/service-reminder
 tile. View the fields in a HomeKit controller that displays custom characteristics,
-or use the read-only inspection report below. The fields are not disguised as an
+alongside the other Vehicle Data fields. The fields are not disguised as an
 air-filter replacement or an unrelated Home sensor.
 
 ## Which features does my vehicle actually have?
@@ -328,20 +310,6 @@ finder. These show both flags explicitly; an enabled service does not validate
 every related command (for example, charging eligibility alone cannot establish
 charge-stop or percentage-limit support).
 
-To inspect your actual vehicle without changing anything, use the same Python and
-plugin paths configured above. Shared token-file access is coordinated through
-the adapter's lock; if it is busy, wait for the current request to finish:
-
-```sh
-"$NISSAN_DATA/venv/bin/python" "$PLUGIN_DIR/python/nissan_bridge.py" \
-  --inspect --auth-file "$NISSAN_DATA/auth.json" \
-  --report "$NISSAN_DATA/vehicle-capabilities.json"
-```
-
-Alternatively omit `--auth-file` to sign in interactively using an independent,
-in-memory session. Add `--dialogs` on macOS for local credential dialogs. This
-independent inspection saves neither password nor tokens. The report includes a
-masked VIN, maintenance timeline, charge settings, service eligibility flags,
-and per-query error types. It excludes location, credentials, and raw error bodies.
-No vehicle commands or wake requests are sent. Inspection results describe the
-time/account queried and can change.
+Inspect **Vehicle Data** and **Maintenance** in a controller that supports custom
+HomeKit characteristics. These reads do not send commands or wake requests.
+Results describe the time/account queried and can change.

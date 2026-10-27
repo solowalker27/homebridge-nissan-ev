@@ -10,3 +10,5 @@ node_modules/
 .npmrc
 auth.json
 *.py[cod]
+
+/sdk/

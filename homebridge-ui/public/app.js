@@ -40,9 +40,6 @@
     document.getElementById('nissan-status-detail').textContent = detail;
     status.dataset.state = state;
   }
-  ui.addEventListener('runtime-progress', event => {
-    if (busy) message('Preparing Nissan connection...', event.data.message);
-  });
   async function config() {
     const blocks = await ui.getPluginConfig();
     return blocks[0] || { platform: 'NissanConnect', name: 'Nissan EV', readOnly: true };
@@ -50,6 +47,7 @@
   async function retainSettings(settings) {
     const blocks = await ui.getPluginConfig();
     blocks[0] = { ...(blocks[0] || { platform: 'NissanConnect', name: 'Nissan EV', readOnly: true }), ...settings };
+    delete blocks[0].pythonPath;
     await ui.updatePluginConfig(blocks);
   }
   function showResult(result) {
@@ -84,7 +82,7 @@
       await retainSettings(result.settings);
       showResult(result);
     } catch (error) {
-      message('Connection needs attention', error.message || 'Unable to connect. Check the runtime and connection settings below.', 'error');
+      message('Connection needs attention', error.message || 'Unable to connect. Check your connection and settings below.', 'error');
     } finally {
       if (payload) delete payload.password;
       if (credentials) delete credentials.password;

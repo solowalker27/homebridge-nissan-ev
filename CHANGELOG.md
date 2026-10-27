@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- Replace pynissan and the Python subprocess with the native TypeScript SDK in
+  [nissan-connect-sdk-ts](https://github.com/solowalker27/nissan-connect-sdk-ts),
+  an auto-generated MIT-licensed translation of bvdcode/nissan-connect-sdk.
+- Install and sign in entirely through Homebridge UI using existing Node.js.
+  Remove Python downloads, dependency provisioning and executable-path settings.
+- Preserve existing saved tokens, accessory UUIDs, linked services and Safari
+  password paste support. Serialize UI/plugin token updates with a shared lock.
+- Abort timed-out native sessions and cancel queued writes; subsequent reads can
+  reconnect without replaying an abandoned command.
+
+
 ## 0.3.0
 
 - Automatically download and provision a private Python runtime and all Nissan dependencies on first use; no terminal configuration is required.

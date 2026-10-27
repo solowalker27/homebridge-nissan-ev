@@ -1,6 +1,6 @@
 {
   "name": "homebridge-nissan-ev",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "One HomeKit accessory per MyNISSAN vehicle, with linked status and remote-control services",
   "main": "index.js",
   "license": "MIT",
@@ -18,9 +18,7 @@
     "index.js",
     "lib/*.js",
     "homebridge-ui/",
-    "python/*.py",
     "config.schema.json",
-    "requirements.txt",
     "README.md",
     "CHANGELOG.md",
     "docs/INSTALL-UTM.md",
@@ -28,13 +26,14 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check lib/platform.js && node --check lib/vehicle.js && node --check lib/bridge.js && node --check lib/auth-ui.js && node --check lib/runtime.js && node --check homebridge-ui/server.js && node --check homebridge-ui/public/app.js"
+    "check": "node --check index.js && node --check lib/platform.js && node --check lib/vehicle.js && node --check lib/bridge.js && node --check lib/adapter.js && node --check lib/auth-ui.js && node --check homebridge-ui/server.js && node --check homebridge-ui/public/app.js"
   },
   "devDependencies": {
     "homebridge": "2.4.0"
   },
   "dependencies": {
     "@homebridge/plugin-ui-utils": "^2.2.6",
+    "@solowalker27/nissan-connect-sdk": "https://github.com/solowalker27/nissan-connect-sdk-ts/archive/dd43ce934c3599edadaef60e4777b8c1c78f391b.tar.gz",
     "proper-lockfile": "^4.1.2"
   },
   "author": "solowalker27",

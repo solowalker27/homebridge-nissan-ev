@@ -1,111 +1,41 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { EventEmitter, once } = require('node:events');
-const { PassThrough } = require('node:stream');
+const { once } = require('node:events');
 const { fork } = require('node:child_process');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { AuthUi } = require('../lib/auth-ui');
-
 function setup() {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.stdin = new PassThrough();
-  let input = '';
-  child.stdin.on('data', chunk => { input += chunk; });
-  child.kill = () => { child.emit('close', 1); };
-  let invocation;
-  const auth = new AuthUi('/private/homebridge', { runtime: { ensure: async python => python, stop() {} }, spawnProcess(...args) { invocation = args; return child; } });
-  return { auth, child, get input() { return input; }, get invocation() { return invocation; },
-    reply(value) { child.stdout.write(JSON.stringify(value)); child.emit('close', 0); } };
+ let reply, reject, credentials;
+ const pending = new Promise((yes,no)=>{reply=yes;reject=no;});
+ const adapter={authenticate(email,password){credentials={email,password};return pending;},status(){return pending;},dispatch(){return pending;},close(){this.closed=true;}};
+ const auth=new AuthUi('/private/homebridge',{adapterFactory:()=>adapter});
+ return {auth,adapter,reply,reject,get credentials(){return credentials;}};
 }
-
-test('UI login uses private stdin, automatic host paths, and returns no credentials', async () => {
-  const ctx = setup();
-  const request = ctx.auth.request('login', { email: 'driver@example.com', password: 'password-secret' });
-  await settleForm();
-  assert.equal(ctx.invocation[0], '/private/homebridge/nissan-connect/venv/bin/python');
-  assert.equal(ctx.invocation[2].shell, false);
-  assert.ok(!JSON.stringify(ctx.invocation).includes('password-secret'));
-  assert.equal(JSON.parse(ctx.input).password, 'password-secret');
-  ctx.reply({ result: { connected: true, verified: true, vehicles: [{ model: 'ARIYA', vinSuffix: '1234' }] } });
-  const result = await request;
-  assert.equal(result.settings.authFile, '/private/homebridge/nissan-connect/auth.json');
-  assert.equal(result.verified, true);
-  assert.ok(!JSON.stringify(result).includes('password-secret'));
+test('native UI login passes credentials directly in memory and returns only safe connection labels',async()=>{
+ const c=setup();const pending=c.auth.request('login',{email:'driver@example.com',password:'password-secret'});await settleForm();assert.equal(c.credentials.password,'password-secret');c.reply({connected:true,verified:true,vehicles:[{model:'ARIYA',vinSuffix:'1234'}]});const result=await pending;assert.equal(result.settings.authFile,'/private/homebridge/nissan-connect/auth.json');assert.ok(!JSON.stringify(result).includes('password-secret'));assert.ok(!('pythonPath' in result.settings));assert.equal(c.adapter.closed,true);
 });
-
-test('UI blocks concurrent requests and rejects unsafe paths before starting a helper', async () => {
-  const ctx = setup();
-  await assert.rejects(ctx.auth.request('status', { config: { authFile: '../auth.json' } }), /absolute/);
-  assert.equal(ctx.invocation, undefined);
-  const pending = ctx.auth.request('status');
-  await assert.rejects(ctx.auth.request('check'), /already running/);
-  await settleForm();
-  ctx.reply({ result: { connected: false } });
-  await pending;
-  assert.equal(ctx.auth.busy, false);
+test('UI single-flight guard and path validation run before contacting Nissan',async()=>{
+ const c=setup();await assert.rejects(c.auth.request('status',{config:{authFile:'../auth'}}),/absolute/);const pending=c.auth.request('status');await assert.rejects(c.auth.request('check'),/already running/);c.reply({connected:false});await pending;assert.equal(c.auth.busy,false);
 });
-
-test('upstream errors and malformed output cannot leak raw diagnostics', async () => {
-  const ctx = setup();
-  const request = ctx.auth.request('check');
-  await settleForm();
-  ctx.child.stderr.write('password-secret token-secret account@example.com');
-  ctx.reply({ error: { type: 'AuthenticationError', status: 401, message: 'token-secret' } });
-  await assert.rejects(request, error => /Nissan rejected/.test(error.message) && !error.message.includes('secret'));
-  const next = setup();
-  const malformed = next.auth.request('status');
-  await settleForm();
-  next.child.stdout.write('token-secret');
-  next.child.emit('close', 1);
-  await assert.rejects(malformed, error => /helper could not start/.test(error.message) && !error.message.includes('secret'));
+test('upstream UI errors cannot leak credentials, tokens, or account diagnostics',async()=>{
+ const c=setup();const pending=c.auth.request('check');c.reject(Object.assign(new Error('password-secret token-secret'),{status:401}));await assert.rejects(pending,e=>/Nissan rejected/.test(e.message)&&!e.message.includes('secret'));assert.equal(c.auth.busy,false);
 });
-
-test('a UI timeout terminates the helper and frees the single-flight guard', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  const ctx = setup();
-  const pending = ctx.auth.request('check');
-  const rejection = assert.rejects(pending);
-  await settleForm();
-  t.mock.timers.tick(90000);
-  await rejection;
-  assert.equal(ctx.auth.busy, false);
-  assert.equal(ctx.auth.children.size, 0);
+test('UI timeout closes the native session and releases its guard',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});const c=setup();const pending=c.auth.request('check');const rejection=assert.rejects(pending,/timed out/);t.mock.timers.tick(90000);await rejection;assert.equal(c.adapter.closed,true);assert.equal(c.auth.busy,false);assert.equal(c.auth.adapters.size,0);
 });
-
-test('official UI server handles real IPC and the installed Python helper without networking', async t => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'nissan-ui-'));
-  const child = fork(path.join(__dirname, '../homebridge-ui/server.js'), [], {
-    env: { ...process.env, HOMEBRIDGE_STORAGE_PATH: temp }, silent: true,
-  });
-  t.after(async () => { child.kill(); await fs.rm(temp, { recursive: true, force: true }); });
-  let logs = '';
-  const streams = [];
-  child.on('message', message => { if (message.action === 'stream') streams.push(message.payload.event); });
-  child.stdout.on('data', chunk => { logs += chunk; });
-  child.stderr.on('data', chunk => { logs += chunk; });
-  const [ready] = await once(child, 'message');
-  assert.equal(ready.action, 'ready');
-  const responsePromise = matchingMessage(child, m => m.action === 'response');
-  child.send({ action: 'request', requestId: 'status-1', path: '/auth/status', body: {
-    config: { pythonPath: path.join(__dirname, '../.venv/bin/python') },
-  } });
-  const response = await responsePromise;
-  assert.equal(response.payload.success, true);
-  assert.equal(response.payload.data.connected, false);
-  assert.equal(response.payload.data.runtimeReady, true);
-  assert.ok(streams.includes('runtime-progress'));
-  const errorPromise = matchingMessage(child, m => m.action === 'response');
-  child.send({ action: 'request', requestId: 'login-1', path: '/auth/login', body: { email: '', password: 'password-secret' } });
-  const error = await errorPromise;
-  assert.equal(error.payload.success, false);
-  assert.ok(!logs.includes('password-secret'));
-  assert.ok(!JSON.stringify(error).includes('password-secret'));
+test('official UI server handles IPC with the packaged Node SDK and no network or Python setup',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'nissan-ui-'));
+ const child=fork(path.join(__dirname,'../homebridge-ui/server.js'),[],{env:{...process.env,HOMEBRIDGE_STORAGE_PATH:temp},silent:true});
+ t.after(async()=>{child.kill();await fs.rm(temp,{recursive:true,force:true});});
+ let logs='';child.stdout.on('data',c=>logs+=c);child.stderr.on('data',c=>logs+=c);
+ const [ready]=await once(child,'message');assert.equal(ready.action,'ready');
+ const pending=matchingMessage(child,m=>m.action==='response');child.send({action:'request',requestId:'status',path:'/auth/status',body:{}});const result=await pending;
+ assert.equal(result.payload.success,true);assert.equal(result.payload.data.connected,false);assert.equal(result.payload.data.runtimeReady,true);assert.ok(!('pythonPath' in result.payload.data.settings));
+ const rejected=matchingMessage(child,m=>m.action==='response');child.send({action:'request',requestId:'invalid',path:'/auth/login',body:{email:'',password:'password-secret'}});const error=await rejected;assert.equal(error.payload.success,false);assert.ok(!logs.includes('password-secret'));assert.ok(!JSON.stringify(error).includes('password-secret'));
 });
 
 function matchingMessage(child, predicate) {
@@ -151,7 +81,7 @@ async function formHarness(requestHandler) {
     submit() { elements.get('nissan-signin').listeners.submit({ preventDefault() {} }); } };
 }
 function formResponse(verified = false) {
-  return { connected: true, verified, settings: { pythonPath: '/python', authFile: '/auth' }, vehicles: [] };
+  return { connected: true, verified, settings: { authFile: '/auth' }, vehicles: [] };
 }
 const settleForm = () => new Promise(resolve => setImmediate(resolve));
 
@@ -210,9 +140,6 @@ test('background status completion or failure never clears a password pasted whi
     const pending = new Promise((resolve, reject) => { complete = () => fail ? reject(new Error('Runtime not ready')) : resolve(formResponse()); });
     const ctx = await formHarness(() => pending);
     await settleForm();
-    ctx.ui.listeners['runtime-progress']({ data: { message: 'Installing the Nissan connection dependencies...' } });
-    assert.equal(ctx.elements.get('nissan-status-title').textContent, 'Preparing Nissan connection...');
-    assert.match(ctx.elements.get('nissan-status-detail').textContent, /Installing/);
     ctx.elements.get('nissan-password').value = 'pasted-before-status-finished';
     complete();
     await ctx.ready;

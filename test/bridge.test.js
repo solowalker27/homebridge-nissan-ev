@@ -1,56 +1,10 @@
 'use strict';
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
-const { PassThrough } = require('node:stream');
-const { PythonBridge } = require('../lib/bridge');
-
-function setup() {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.stdin = new PassThrough();
-  const requests = [];
-  child.stdin.on('data', chunk => requests.push(JSON.parse(chunk.toString())));
-  child.kill = () => child.emit('exit', 1);
-  const bridge = new PythonBridge({ authFile: '/private/auth.json' }, {}, () => child);
-  const reply = (id, result) => child.stdout.write(JSON.stringify({ id, result }) + '\n');
-  return { child, bridge, requests, reply };
-}
-
-test('RPC sends one request at a time, keeping credentials out of arguments', async () => {
-  const ctx = setup();
-  const first = ctx.bridge.request('snapshot', { vin: 'test' });
-  const second = ctx.bridge.request('command', { vin: 'test', action: 'lock' });
-  assert.equal(ctx.requests.length, 1);
-  ctx.reply(ctx.requests[0].id, { ok: true });
-  await first;
-  assert.equal(ctx.requests.length, 2);
-  ctx.reply(ctx.requests[1].id, { complete: true });
-  assert.deepEqual(await second, { complete: true });
-  ctx.bridge.stop();
-});
-
-test('worker crash rejects pending and queued requests without executing queued writes', async () => {
-  const ctx = setup();
-  const first = ctx.bridge.request('snapshot');
-  const second = ctx.bridge.request('command', { action: 'unlock' });
-  const expected = [assert.rejects(first), assert.rejects(second)];
-  ctx.child.emit('exit', 1);
-  await Promise.all(expected);
-  assert.equal(ctx.requests.length, 1);
-  assert.equal(ctx.bridge.queue.length, 0);
-  ctx.bridge.stop();
-});
-
-test('timeout kills worker and cancels queued writes', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  const ctx = setup();
-  const first = ctx.bridge.request('vehicles');
-  const second = ctx.bridge.request('command', { action: 'unlock' });
-  const expected = [assert.rejects(first), assert.rejects(second)];
-  t.mock.timers.tick(45000);
-  await Promise.all(expected);
-  assert.equal(ctx.requests.length, 1);
-  ctx.bridge.stop();
-});
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {NissanBridge}=require('../lib/bridge');
+const settle=()=>new Promise(r=>setImmediate(r));
+function setup(){const calls=[];let finish;const adapter={dispatch(method,args){calls.push({method,args});return new Promise(r=>finish=r);},close(){this.closed=true;}};const bridge=new NissanBridge({authFile:'/private/auth.json'}, {},()=>adapter);return{bridge,adapter,calls,reply(value){finish(value);}};}
+test('native queue sends one request at a time',async()=>{const c=setup();const first=c.bridge.request('snapshot');const second=c.bridge.request('command',{action:'lock'});await settle();assert.equal(c.calls.length,1);c.reply({ok:true});await first;await settle();assert.equal(c.calls.length,2);c.reply({complete:true});assert.deepEqual(await second,{complete:true});c.bridge.stop();});
+test('timeout aborts the native session and cancels queued writes without replay',async t=>{t.mock.timers.enable({apis:['setTimeout']});const c=setup();const first=c.bridge.request('vehicles');const second=c.bridge.request('command',{action:'unlock'});const checks=[assert.rejects(first,/timed out/),assert.rejects(second,/timed out/)];await settle();t.mock.timers.tick(45000);await Promise.all(checks);assert.equal(c.adapter.closed,true);assert.equal(c.calls.length,1);assert.equal(c.bridge.queue.length,0);c.bridge.stop();});
+test('a fresh read can recover after timeout; the abandoned command is never retried',async t=>{t.mock.timers.enable({apis:['setTimeout']});let instances=0;const calls=[];const bridge=new NissanBridge({authFile:'/auth'}, {},()=>{instances++;return{close(){},dispatch(method){calls.push(method);return instances===1?new Promise(()=>{}):Promise.resolve(['recovered']);}};});const pending=bridge.request('command',{action:'lock'});const rejection=assert.rejects(pending);await settle();t.mock.timers.tick(45000);await rejection;assert.deepEqual(await bridge.request('vehicles'),['recovered']);assert.deepEqual(calls,['command','vehicles']);bridge.stop();});
+test('read-only blocks writes before dispatch and errors never include upstream data',async()=>{const c=setup();c.bridge.config.readOnly=true;await assert.rejects(c.bridge.request('command'),/disabled/);assert.equal(c.calls.length,0);c.bridge.stop();const bridge=new NissanBridge({authFile:'/auth'}, {},()=>({close(){},async dispatch(){throw new Error('token-secret');}}));await assert.rejects(bridge.request('vehicles'),e=>!e.message.includes('token-secret'));bridge.stop();});
