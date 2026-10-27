@@ -22,6 +22,9 @@ not affiliated with Nissan or Homebridge.
 | Lock/unlock all doors | Lock Mechanism (primary service) |
 | Charging start/stop | Outlet; On and In Use reflect reported charging |
 | Battery percentage, charging state, low battery | Battery service |
+| Battery percentage for Home display and Shortcut reads | Read-only dimmable Lightbulb; brightness equals battery percentage |
+| Battery automation threshold and enable/disable | Dimmable Lightbulb; brightness sets percentage and On enables monitoring |
+| Battery threshold reached | Contact Sensor; opens when enabled and battery is at or above the threshold |
 | Charge cable connected | Contact Sensor; closed means connected |
 | Cabin climate temperature and target | Thermostat, with Off/Auto control |
 | Climate on/off | Fan service; no invented fan-speed controls |
@@ -138,6 +141,38 @@ path changes, or changing platform options still require Save and restart.
 
 UI login requires Homebridge Config UI X with custom plugin UI support; the
 packaged `homebridge-ui` uses the official `@homebridge/plugin-ui-utils` API.
+
+## Battery percentage and Home automations
+
+The genuine **Battery** service is retained. Three additional services are linked
+to the same vehicle accessory:
+
+| Service | Behavior |
+| --- | --- |
+| **Battery Level** light | Brightness is the latest reported battery percentage. Both brightness and power are read-only. Power is on above 0% and off at 0%; it does not indicate charging. |
+| **Battery Threshold** light | Brightness sets the threshold from 0–100% in 1% steps. Turn this light on to enable monitoring or off to disable it. The default is 80% and disabled. |
+| **Battery Threshold Reached** contact sensor | Open when monitoring is enabled and battery percentage is greater than or equal to the threshold; closed below the threshold or when monitoring is disabled. |
+
+For an 80% automation, set **Battery Threshold** brightness to 80%, turn that light
+on, then create a Home automation using **A Sensor Detects Something → Battery
+Threshold Reached → Opens** and select your desired action.
+
+Changing the threshold or its enabled state updates the contact immediately using
+the latest available reading. For example, a jump from 79% to 81% trips an 80%
+threshold. Turning the control off clears the contact immediately. Re-enabling
+it while already at or above the threshold opens the contact again. Threshold
+percentage, enabled state and custom service names are saved across restarts.
+
+These are local automation controls. They remain usable when the plugin's remote
+commands are blocked by `readOnly`. They do not set Nissan's charge limit or start
+or stop charging; any charging action must be added explicitly to your automation.
+The battery display light rejects attempts to change its brightness or power.
+
+When monitoring is enabled, missing, invalid, failed or stale battery reads make
+the contact unavailable and set its fault flag. Disabled monitoring always reports
+a closed, non-faulted contact. Cached readings from before a restart are not used
+until a new snapshot succeeds. Normal polling defaults to five minutes, and Nissan
+may return older vehicle data even after a successful API read.
 
 ## Rename at any time
 

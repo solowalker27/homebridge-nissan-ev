@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- Retain the genuine battery service and add a read-only dimmable-light proxy:
+  brightness displays the reported battery percentage, with writes rejected.
+- Add a Battery Threshold light whose brightness sets a local 0–100% threshold
+  and whose power enables or disables monitoring. Default to 80% and disabled.
+- Add a linked Battery Threshold Reached contact sensor. It opens when an enabled
+  threshold is met or exceeded and closes below the threshold or when disabled.
+- Persist threshold settings across restarts, update sensor events immediately
+  when settings change, and reject stale or invalid battery readings while enabled.
+- Keep all three services linked to the existing vehicle accessory. Threshold
+  settings remain local and do not send charging commands or set Nissan charge limits.
+
 ## 0.3.1
 
 - Use the vehicle name directly for the primary lock service, preventing repeated

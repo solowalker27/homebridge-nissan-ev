@@ -358,3 +358,149 @@ test('explicit vehicle names are preserved and resetting a service to its defaul
   assert.equal(await configured.handleGetRequest(), 'Roadrunner Charging');
   ctx.controller.stop();
 });
+
+test('battery proxies keep genuine battery telemetry and expose a read-only percentage light', async () => {
+  const ctx = setup();
+  const data = snapshot(); data.status.battery.level = 73; ctx.setData(data);
+  await ctx.controller.refresh();
+  assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 73);
+  const brightness = char(ctx, 'battery-level', hap.Characteristic.Brightness);
+  const power = char(ctx, 'battery-level', hap.Characteristic.On);
+  assert.equal(await brightness.handleGetRequest(), 73);
+  assert.equal(await power.handleGetRequest(), true);
+  for (const characteristic of [brightness, power]) assert.deepEqual(characteristic.props.perms, ['pr', 'ev']);
+  await assert.rejects(brightness.handleSetRequest(20));
+  await assert.rejects(power.handleSetRequest(false));
+  assert.equal(await brightness.handleGetRequest(), 73);
+  assert.equal(await char(ctx, 'battery-threshold-control', hap.Characteristic.On).handleGetRequest(), false);
+  assert.equal(await char(ctx, 'battery-threshold-control', hap.Characteristic.Brightness).handleGetRequest(), 80);
+  assert.equal(await char(ctx, 'battery-threshold-reached', hap.Characteristic.ContactSensorState).handleGetRequest(), 0);
+  for (const key of ['battery-level', 'battery-threshold-control', 'battery-threshold-reached']) {
+    const service = ctx.accessory.services.find(s => s.subtype === `nissan:${key}`);
+    assert.ok(ctx.controller.primary.linkedServices.includes(service));
+  }
+  assert.ok(ctx.calls.every(call => call.method === 'snapshot'));
+  ctx.controller.stop();
+});
+
+test('threshold brightness and power update the contact immediately without issuing car commands', async () => {
+  const ctx = setup({ readOnly: true });
+  const data = snapshot(); data.status.battery.level = 79; ctx.setData(data);
+  await ctx.controller.refresh();
+  const threshold = char(ctx, 'battery-threshold-control', hap.Characteristic.Brightness);
+  const enabled = char(ctx, 'battery-threshold-control', hap.Characteristic.On);
+  const sensor = char(ctx, 'battery-threshold-reached', hap.Characteristic.ContactSensorState);
+  await threshold.handleSetRequest(80);
+  await enabled.handleSetRequest(true);
+  assert.equal(await sensor.handleGetRequest(), 0);
+  data.status.battery.level = 81; await ctx.controller.refresh();
+  assert.equal(await sensor.handleGetRequest(), 1); // Skipping over exactly 80 must still trip.
+  await enabled.handleSetRequest(false);
+  assert.equal(await sensor.handleGetRequest(), 0);
+  await threshold.handleSetRequest(70);
+  assert.equal(await enabled.handleGetRequest(), false);
+  assert.equal(await sensor.handleGetRequest(), 0);
+  await enabled.handleSetRequest(true);
+  assert.equal(await sensor.handleGetRequest(), 1);
+  await threshold.handleSetRequest(90);
+  assert.equal(await sensor.handleGetRequest(), 0);
+  data.status.battery.level = 90; await ctx.controller.refresh();
+  assert.equal(await sensor.handleGetRequest(), 1);
+  data.status.battery.level = 89; await ctx.controller.refresh();
+  assert.equal(await sensor.handleGetRequest(), 0);
+  assert.equal(await char(ctx, 'battery-level', hap.Characteristic.Brightness).handleGetRequest(), 89);
+  assert.ok(ctx.calls.every(call => call.method === 'snapshot'));
+  ctx.controller.stop();
+});
+
+test('threshold setting, enabled state and proxy names persist through restart without trusting cached battery data', async () => {
+  const ctx = setup(); await ctx.controller.refresh();
+  await char(ctx, 'battery-threshold-control', hap.Characteristic.Brightness).handleSetRequest(85);
+  await char(ctx, 'battery-threshold-control', hap.Characteristic.On).handleSetRequest(true);
+  await char(ctx, 'battery-threshold-control', hap.Characteristic.ConfiguredName).handleSetRequest('Charge Target');
+  const ids = ctx.accessory.services.map(s => s.getServiceId()); ctx.controller.stop();
+  const restored = PlatformAccessory.deserialize(PlatformAccessory.serialize(ctx.accessory));
+  const next = setup({}, {}, restored);
+  assert.equal(await char(next, 'battery-threshold-control', hap.Characteristic.Brightness).handleGetRequest(), 85);
+  assert.equal(await char(next, 'battery-threshold-control', hap.Characteristic.On).handleGetRequest(), true);
+  await assert.rejects(char(next, 'battery-level', hap.Characteristic.Brightness).handleGetRequest());
+  await assert.rejects(char(next, 'battery-threshold-reached', hap.Characteristic.ContactSensorState).handleGetRequest());
+  assert.equal(await char(next, 'battery-threshold-reached', hap.Characteristic.StatusFault).handleGetRequest(), 1);
+  await next.controller.refresh(); next.controller.rename('Roadrunner');
+  assert.equal(await char(next, 'battery-threshold-reached', hap.Characteristic.ContactSensorState).handleGetRequest(), 1);
+  assert.equal(await char(next, 'battery-threshold-control', hap.Characteristic.ConfiguredName).handleGetRequest(), 'Charge Target');
+  assert.deepEqual(next.accessory.services.map(s => s.getServiceId()), ids);
+  next.controller.stop();
+});
+
+test('disabled threshold stays closed offline while enabled sensors require a fresh valid battery percentage', async () => {
+  const ctx = setup();
+  const enabled = char(ctx, 'battery-threshold-control', hap.Characteristic.On);
+  const sensor = char(ctx, 'battery-threshold-reached', hap.Characteristic.ContactSensorState);
+  const fault = char(ctx, 'battery-threshold-reached', hap.Characteristic.StatusFault);
+  assert.equal(await sensor.handleGetRequest(), 0);
+  await enabled.handleSetRequest(true);
+  await assert.rejects(sensor.handleGetRequest());
+  await ctx.controller.refresh(); assert.equal(await sensor.handleGetRequest(), 1);
+  ctx.controller.lastRead = 0;
+  await assert.rejects(sensor.handleGetRequest()); assert.equal(await fault.handleGetRequest(), 1);
+  await enabled.handleSetRequest(false);
+  assert.equal(await sensor.handleGetRequest(), 0); assert.equal(await fault.handleGetRequest(), 0);
+  await enabled.handleSetRequest(true);
+  for (const value of [null, undefined, NaN, -1, 101, '92', 80.5]) {
+    ctx.controller.lastRead = Date.now(); ctx.controller.data.status.battery.level = value;
+    await assert.rejects(sensor.handleGetRequest());
+    await assert.rejects(char(ctx, 'battery-level', hap.Characteristic.Brightness).handleGetRequest());
+  }
+  ctx.setRequest(async () => { throw new Error('offline'); });
+  await ctx.controller.refresh(); await assert.rejects(sensor.handleGetRequest());
+  await enabled.handleSetRequest(false); assert.equal(await sensor.handleGetRequest(), 0);
+  ctx.controller.stop();
+});
+
+test('battery thresholds support 0 and 100 percent and reject invalid settings without changing stored values', async () => {
+  const ctx = setup(); const data = snapshot(); data.status.battery.level = 0; ctx.setData(data);
+  await ctx.controller.refresh();
+  const threshold = char(ctx, 'battery-threshold-control', hap.Characteristic.Brightness);
+  const enabled = char(ctx, 'battery-threshold-control', hap.Characteristic.On);
+  const sensor = char(ctx, 'battery-threshold-reached', hap.Characteristic.ContactSensorState);
+  await threshold.handleSetRequest(0); await enabled.handleSetRequest(true);
+  assert.equal(await sensor.handleGetRequest(), 1);
+  assert.equal(await char(ctx, 'battery-level', hap.Characteristic.On).handleGetRequest(), false);
+  assert.equal(await char(ctx, 'battery-level', hap.Characteristic.Brightness).handleGetRequest(), 0);
+  await threshold.handleSetRequest(100); assert.equal(await sensor.handleGetRequest(), 0);
+  data.status.battery.level = 100; await ctx.controller.refresh(); assert.equal(await sensor.handleGetRequest(), 1);
+  for (const value of [-1, 101, 80.5, NaN, '80', null]) await assert.rejects(threshold.handleSetRequest(value));
+  await assert.rejects(enabled.handleSetRequest('yes'));
+  assert.equal(await threshold.handleGetRequest(), 100); assert.equal(await enabled.handleGetRequest(), true);
+  ctx.controller.stop();
+});
+
+test('battery threshold changes publish contact transitions for Home automations', async () => {
+  const ctx = setup(); const data = snapshot(); data.status.battery.level = 79; ctx.setData(data);
+  await ctx.controller.refresh();
+  const sensor = char(ctx, 'battery-threshold-reached', hap.Characteristic.ContactSensorState);
+  const transitions = [];
+  sensor.on('change', event => { if (event.oldValue !== event.newValue && typeof event.newValue === 'number') transitions.push(event.newValue); });
+  const enabled = char(ctx, 'battery-threshold-control', hap.Characteristic.On);
+  const threshold = char(ctx, 'battery-threshold-control', hap.Characteristic.Brightness);
+  await enabled.handleSetRequest(true);
+  assert.equal(sensor.value, 0);
+  data.status.battery.level = 81; await ctx.controller.refresh();
+  assert.equal(sensor.value, 1);
+  await ctx.controller.refresh();
+  await enabled.handleSetRequest(false); assert.equal(sensor.value, 0);
+  await enabled.handleSetRequest(true); assert.equal(sensor.value, 1);
+  await threshold.handleSetRequest(90); assert.equal(sensor.value, 0);
+  assert.deepEqual(transitions, [1, 0, 1, 0]);
+  ctx.controller.stop();
+  const restored = PlatformAccessory.deserialize(PlatformAccessory.serialize(ctx.accessory));
+  const next = setup({}, {}, restored);
+  await char(next, 'battery-threshold-control', hap.Characteristic.On).handleSetRequest(false);
+  const disabled = PlatformAccessory.deserialize(PlatformAccessory.serialize(next.accessory)); next.controller.stop();
+  const last = setup({}, {}, disabled);
+  assert.equal(await char(last, 'battery-threshold-control', hap.Characteristic.On).handleGetRequest(), false);
+  assert.equal(await char(last, 'battery-threshold-control', hap.Characteristic.Brightness).handleGetRequest(), 90);
+  assert.equal(await char(last, 'battery-threshold-reached', hap.Characteristic.ContactSensorState).handleGetRequest(), 0);
+  last.controller.stop();
+});
