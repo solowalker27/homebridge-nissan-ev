@@ -24,7 +24,7 @@ not affiliated with Nissan or Homebridge.
 | Battery percentage, charging state, low battery | Battery service |
 | Battery percentage for Home display and Shortcut reads | Read-only dimmable Lightbulb; brightness equals battery percentage |
 | Battery automation threshold and enable/disable | Dimmable Lightbulb; brightness sets percentage and On enables monitoring |
-| Battery threshold reached | Contact Sensor; opens when enabled and battery is at or above the threshold |
+| Battery threshold reached | Read-only Outlet by default; configurable as Contact Sensor or read-only Switch |
 | Charge cable connected | Contact Sensor; closed means connected |
 | Cabin climate temperature and target | Thermostat, with Off/Auto control |
 | Climate on/off | Fan service; no invented fan-speed controls |
@@ -151,17 +151,50 @@ to the same vehicle accessory:
 | --- | --- |
 | **Battery Level** light | Brightness is the latest reported battery percentage. Both brightness and power are read-only. Power is on above 0% and off at 0%; it does not indicate charging. |
 | **Battery Threshold** light | Brightness sets the threshold from 0–100% in 1% steps. Turn this light on to enable monitoring or off to disable it. The default is 80% and disabled. |
-| **Battery Threshold Reached** contact sensor | Open when monitoring is enabled and battery percentage is greater than or equal to the threshold; closed below the threshold or when monitoring is disabled. |
+| **Battery Threshold Reached** indicator | A read-only outlet by default. On when monitoring is enabled and battery percentage is greater than or equal to the threshold; off below the threshold or when monitoring is disabled, apart from brief repeat pulses. Outlet In Use follows the same state. |
 
 For an 80% automation, set **Battery Threshold** brightness to 80%, turn that light
-on, then create a Home automation using **A Sensor Detects Something → Battery
-Threshold Reached → Opens** and select your desired action.
+on, then create a Home automation using **An Accessory Is Controlled → Battery
+Threshold Reached → Turns On** and select your desired action.
 
-Changing the threshold or its enabled state updates the contact immediately using
+Changing the threshold or its enabled state updates the indicator immediately using
 the latest available reading. For example, a jump from 79% to 81% trips an 80%
-threshold. Turning the control off clears the contact immediately. Re-enabling
-it while already at or above the threshold opens the contact again. Threshold
+threshold. Turning the control off clears the indicator immediately. Re-enabling
+it while already at or above the threshold activates it again. Threshold
 percentage, enabled state and custom service names are saved across restarts.
+
+Plugin settings provide two options:
+
+- **Battery threshold indicator type** (`batteryThresholdIndicatorType`):
+  `outlet` (default), `contact`, or `switch`. All types are read-only. A contact
+  sensor opens when triggered and closes when cleared; use **A Sensor Detects
+  Something → Opens** for its automation. A switch uses **Turns On** like the outlet.
+- **Repeat threshold trigger on each battery increase**
+  (`batteryThresholdRepeatOnIncrease`): enabled by default. Once an enabled
+  threshold is met, each newly observed higher battery percentage turns the
+  outlet/switch off for one second and then on again. A contact sensor closes and
+  reopens instead. Rapid increases queue separate pulses with one second in the
+  active state between them. Turn this option off for steady threshold status.
+
+For example, with a threshold of 80%, the first reading of 80% activates the
+indicator. A subsequent reading of 81% briefly clears it and activates it again,
+allowing the Home automation to run again. Repeated readings of 81%, or a decrease
+to 80%, leave it active without a repeat. One newly observed jump produces one
+repeat, even if several percentage points were skipped between polls. Other
+updates, renames and unchanged polls do not generate repeats.
+
+Disabling the threshold or changing its percentage cancels pending pulses.
+Invalid/failed readings and shutdown also cancel pulses; the delayed reactivation
+checks the reading is still valid and the threshold still met. Restart establishes
+a new observation baseline. Repeats occur at the cadence of newly reported battery
+increases; remote actions still depend on the Home hub and target accessory.
+
+Save plugin settings and restart Homebridge after changing either option.
+**Upgrading from 0.4.0 changes the default indicator from a contact sensor to an
+outlet.** Update automations to use the outlet's **Turns On** trigger, or select
+**Contact sensor** before restarting to retain the old service type. Changing type
+replaces only the indicator service; threshold settings, custom names and the
+vehicle's other services are retained.
 
 These are local automation controls. They remain usable when the plugin's remote
 commands are blocked by `readOnly`. They do not set Nissan's charge limit or start
@@ -169,8 +202,8 @@ or stop charging; any charging action must be added explicitly to your automatio
 The battery display light rejects attempts to change its brightness or power.
 
 When monitoring is enabled, missing, invalid, failed or stale battery reads make
-the contact unavailable and set its fault flag. Disabled monitoring always reports
-a closed, non-faulted contact. Cached readings from before a restart are not used
+the indicator unavailable and set its fault flag. Disabled monitoring always reports
+an inactive, non-faulted indicator. Cached readings from before a restart are not used
 until a new snapshot succeeds. Normal polling defaults to five minutes, and Nissan
 may return older vehicle data even after a successful API read.
 

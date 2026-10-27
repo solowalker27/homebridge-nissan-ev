@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+- Make Battery Threshold Reached configurable as a read-only outlet (the new
+  default), contact sensor or read-only switch in Homebridge plugin settings.
+- Repeat threshold events on newly observed battery increases by default: reset
+  the indicator for one second, then reassert it while the threshold remains met.
+  Queue rapid increases separately with one second between pulses.
+- Add a setting to disable repeated events. Unchanged or decreasing readings do
+  not repeat; disabling the threshold, changing it, losing valid data or shutting
+  down cancels pending pulses.
+- Replace only the indicator when changing types, preserving threshold settings
+  and custom names. Reconfigure existing contact-based automations for the new
+  default outlet, or select Contact sensor to retain the original service type.
+
 ## 0.4.0
 
 - Retain the genuine battery service and add a read-only dimmable-light proxy:

@@ -36,6 +36,20 @@
         "minimum": 0,
         "maximum": 100
       },
+      "batteryThresholdIndicatorType": {
+        "title": "Battery threshold indicator type",
+        "type": "string",
+        "enum": ["outlet", "contact", "switch"],
+        "enumNames": ["Read-only outlet", "Contact sensor", "Read-only switch"],
+        "default": "outlet",
+        "description": "How Battery Threshold Reached appears in Home. All types are read-only. Changing the type replaces only this service after restart; update automations that use it."
+      },
+      "batteryThresholdRepeatOnIncrease": {
+        "title": "Repeat threshold trigger on each battery increase",
+        "type": "boolean",
+        "default": true,
+        "description": "While monitoring is enabled and the threshold is already met, briefly reset the indicator for each newly observed higher battery percentage. Outlets and switches turn off for one second then on; contact sensors close then reopen. Unchanged readings do not repeat."
+      },
       "includeLocation": {
         "title": "Expose location and Locate Vehicle command",
         "type": "boolean",
