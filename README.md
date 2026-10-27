@@ -86,13 +86,19 @@ The UI creates the platform configuration for you. A minimal manual entry is:
 {
   "platform": "NissanConnect",
   "name": "Nissan EV",
-  "readOnly": true
+  "readOnly": false
 }
 ```
 
-`readOnly: true` blocks vehicle commands while retaining status. Set it to false
-when ready to use remote actions; vehicle support and Nissan entitlement still
-apply. Names and per-vehicle overrides can be set with:
+**Disable secure vehicle controls** (`readOnly`) defaults to **off**. Enable it
+for status-only use to prevent accidental actions from Home, Siri or automations.
+It blocks all vehicle commands, including locking/unlocking, climate, charging,
+horn/lights, schedules and vehicle wake/refresh/location requests. Status polling
+and local battery threshold controls remain available. It does not restrict access
+outside your home network. Existing saved choices are preserved; if an older
+version enabled this during setup, turn it off in plugin settings to allow controls.
+Vehicle support and Nissan entitlement still apply. Names and per-vehicle overrides
+can be set with:
 
 ```json
 {

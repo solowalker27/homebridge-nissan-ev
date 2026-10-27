@@ -56,9 +56,10 @@
         "default": true
       },
       "readOnly": {
-        "title": "Block all remote commands",
+        "title": "Disable secure vehicle controls",
         "type": "boolean",
-        "default": false
+        "default": false,
+        "description": "Enable for status-only use to prevent accidental vehicle actions from Home, Siri or automations. Blocks all commands sent to Nissan, including locking/unlocking, climate, charging, horn/lights, schedules and vehicle wake/refresh/location requests. Status polling and local battery threshold controls remain available. This does not restrict access outside your home network. Off by default."
       },
       "vehicles": {
         "title": "Vehicle names and overrides (optional)",

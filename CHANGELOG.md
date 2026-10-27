@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Fix the sign-in UI enabling status-only mode for new configurations despite the
+  schema default being off. Default vehicle controls to enabled in setup and runtime,
+  while preserving explicitly saved choices.
+- Rename the setting to "Disable secure vehicle controls" and explain the commands
+  it blocks, its purpose and that it does not limit access outside the home network.
+
 ## 0.5.0
 
 - Make Battery Threshold Reached configurable as a read-only outlet (the new

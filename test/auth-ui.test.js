@@ -49,7 +49,7 @@ function matchingMessage(child, predicate) {
   });
 }
 
-async function formHarness(requestHandler) {
+async function formHarness(requestHandler, initialBlocks) {
   const source = await fs.readFile(path.join(__dirname, '../homebridge-ui/public/app.js'), 'utf8');
   const elements = new Map();
   for (const id of ['nissan-signin', 'nissan-email', 'nissan-password', 'nissan-password-toggle', 'nissan-connect', 'nissan-check', 'nissan-status', 'nissan-status-title', 'nissan-status-detail']) {
@@ -63,6 +63,7 @@ async function formHarness(requestHandler) {
     });
   }
   let blocks = [{ platform: 'NissanConnect', name: 'Existing', readOnly: false, vehicles: [{ vin: 'TESTVIN', name: 'Bluebird' }], _bridge: { username: 'AA:BB' } }];
+  if (initialBlocks !== undefined) blocks = structuredClone(initialBlocks);
   const requests = [];
   const ui = {
     async getPluginConfig() { return structuredClone(blocks); },
@@ -84,6 +85,24 @@ function formResponse(verified = false) {
   return { connected: true, verified, settings: { authFile: '/auth' }, vehicles: [] };
 }
 const settleForm = () => new Promise(resolve => setImmediate(resolve));
+
+test('setup defaults vehicle controls to enabled and preserves explicit status-only choices', async () => {
+  const schema = JSON.parse(await fs.readFile(path.join(__dirname, '../config.schema.json'), 'utf8'));
+  assert.equal(schema.schema.properties.readOnly.default, false);
+  for (const initialBlocks of [[], [{ platform: 'NissanConnect' }], [{ readOnly: false }], [{ readOnly: true }]]) {
+    const expected = initialBlocks[0]?.readOnly ?? false;
+    const ctx = await formHarness(undefined, initialBlocks);
+    await ctx.ready;
+    assert.equal(ctx.requests[0].body.config.readOnly, expected);
+    assert.equal(ctx.blocks[0].readOnly, expected);
+    ctx.elements.get('nissan-email').value = 'driver@example.com';
+    ctx.elements.get('nissan-password').value = 'password-secret';
+    ctx.submit();
+    await settleForm();
+    assert.equal(ctx.requests.at(-1).body.config.readOnly, expected);
+    assert.equal(ctx.blocks[0].readOnly, expected);
+  }
+});
 
 test('settings form clears password, preserves configuration, and treats saved auth as unverified', async () => {
   let rejectLogin = false;

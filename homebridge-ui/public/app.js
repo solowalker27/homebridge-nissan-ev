@@ -42,11 +42,11 @@
   }
   async function config() {
     const blocks = await ui.getPluginConfig();
-    return blocks[0] || { platform: 'NissanConnect', name: 'Nissan EV', readOnly: true };
+    return { platform: 'NissanConnect', name: 'Nissan EV', readOnly: false, ...blocks[0] };
   }
   async function retainSettings(settings) {
     const blocks = await ui.getPluginConfig();
-    blocks[0] = { ...(blocks[0] || { platform: 'NissanConnect', name: 'Nissan EV', readOnly: true }), ...settings };
+    blocks[0] = { platform: 'NissanConnect', name: 'Nissan EV', readOnly: false, ...blocks[0], ...settings };
     delete blocks[0].pythonPath;
     await ui.updatePluginConfig(blocks);
   }
