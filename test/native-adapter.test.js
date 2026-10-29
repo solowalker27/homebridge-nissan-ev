@@ -54,3 +54,30 @@ test('UI authentication and battery reads use the actual TypeScript SDK over the
  assert.ok(!JSON.stringify(await privateRead(file)).includes('secret'));
  assert.ok(calls.slice(1).every(c=>!c.body.includes('secret')));
 });
+
+test('lock and unlock traverse the actual SDK, native HTTP and door completion parser', async t => {
+ const file = await setup(t);
+ const sdk = require('@solowalker27/nissan-connect-sdk');
+ const operations = [];
+ const sessions = [];
+ const adapter = new Adapter(file, { clientFactory: options => {
+  const session = new sdk.FetchSession(async (url, request) => {
+   const body = JSON.parse(request.body); operations.push(body);
+   const data = body.operationName === 'CheckDoorServiceRequest'
+    ? { checkDoorServiceRequest: { status: 'SUCCESS' } }
+    : { [body.operationName === 'DoorLock' ? 'doorLock' : 'doorUnlock']: { serviceRequestId: 'door-request' } };
+   return new Response(JSON.stringify({ data }), { status: 200 });
+  });
+  sessions.push(session); return new sdk.NissanClient(session, options);
+ } });
+ t.after(() => { adapter.close(); sessions.forEach(session => session.close()); });
+ for (const action of ['lock', 'unlock']) {
+  const submitted = await adapter.dispatch('command', { vin: 'SYNTHETICVIN', action });
+  assert.deepEqual(submitted, { complete: false, request: { id: 'door-request', kind: sdk.ServiceRequestKind.DOOR.value } });
+  const completed = await adapter.dispatch('command_status', { vin: 'SYNTHETICVIN', request: submitted.request });
+  assert.equal(completed.terminal, true); assert.equal(completed.success, true);
+ }
+ assert.deepEqual(operations.map(op => op.operationName), ['DoorLock', 'CheckDoorServiceRequest', 'DoorUnlock', 'CheckDoorServiceRequest']);
+ assert.ok(operations.every(op => op.variables.vin === 'SYNTHETICVIN'));
+ assert.equal(operations[1].variables.serviceRequestId, 'door-request');
+});

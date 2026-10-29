@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.2
+
+- Keep the requested lock/unlock target while Nissan processes a command instead
+  of immediately snapping it back to the previous state. Current lock state still
+  reflects reported vehicle telemetry. Repeated writes of the same pending lock
+  target do not send another command.
+- Stop reporting door/window and charge-cable sensor faults when an unrelated
+  vehicle command fails. Sensor faults now depend on their own available, fresh
+  telemetry; command failures remain visible in command diagnostics and logs.
+- Log an actionable reason when settings or an in-progress command block a write.
+- Test lock/unlock through real HAP handlers and the actual SDK/native HTTP path
+  with simulated Nissan responses, including failed submissions and completion.
+
 ## 0.5.1
 
 - Fix the sign-in UI enabling status-only mode for new configurations despite the

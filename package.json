@@ -1,6 +1,6 @@
 {
   "name": "homebridge-nissan-ev",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "One HomeKit accessory per MyNISSAN vehicle, with linked status and remote-control services",
   "main": "index.js",
   "license": "MIT",

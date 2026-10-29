@@ -40,6 +40,73 @@ function setup(config = {}, settings = {}, accessory) {
   return { controller, accessory, platform, calls, setData(value) { data = value; }, setRequest(value) { request = value; } };
 }
 const char = (ctx, key, Type) => ctx.accessory.services.find(s => s.subtype === `nissan:${key}`).getCharacteristic(Type);
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('pending lock keeps the requested target without reporting an unconfirmed current state', async () => {
+ for (const [action, initial, requested] of [['lock', 'UNLOCKED', 1], ['unlock', 'LOCKED', 0]]) {
+  const ctx = setup();
+  const data = snapshot(); data.status.doors.overall_lock = initial; ctx.setData(data);
+  await ctx.controller.refresh();
+  let finish; let submissions = 0;
+  ctx.setRequest((method, args) => {
+    if (method === 'command') {
+      submissions++; assert.equal(args.action, action);
+      return new Promise(resolve => { finish = resolve; });
+    }
+    return Promise.resolve(data);
+  });
+  const target = char(ctx, 'lock', hap.Characteristic.LockTargetState);
+  const current = char(ctx, 'lock', hap.Characteristic.LockCurrentState);
+  await target.handleSetRequest(requested, {});
+  await settle();
+  assert.equal(target.value, requested);
+  assert.equal(await target.handleGetRequest(), requested);
+  assert.equal(await current.handleGetRequest(), 1 - requested);
+  await target.handleSetRequest(requested, {}); // A controller retry must not send a second request.
+  assert.equal(submissions, 1);
+  assert.equal(ctx.controller.busy, true);
+  data.status.doors.overall_lock = requested ? 'LOCKED' : 'UNLOCKED';
+  finish({ complete: true }); await ctx.controller.commandPromise;
+  assert.equal(await current.handleGetRequest(), requested);
+  assert.equal(await target.handleGetRequest(), requested);
+  ctx.controller.stop();
+ }
+});
+
+test('blocked lock writes log an actionable reason without dispatching to Nissan', async () => {
+  for (const [config, settings, reason] of [
+    [{ readOnly: true }, {}, /Disable secure vehicle controls is enabled/],
+    [{}, { disabledFeatures: ['lock'] }, /lock commands are disabled/],
+  ]) {
+    const ctx = setup(config, settings); const warnings = [];
+    ctx.platform.log.warn = message => warnings.push(message);
+    await assert.rejects(char(ctx, 'lock', hap.Characteristic.LockTargetState).handleSetRequest(1),
+      error => error === hap.HAPStatus.NOT_ALLOWED_IN_CURRENT_STATE);
+    assert.equal(ctx.calls.length, 0);
+    assert.match(warnings[0], reason);
+    assert.match(warnings[0], /lock not sent/);
+    ctx.controller.stop();
+  }
+});
+
+test('a rejected lock submission does not fault fresh linked sensors or battery readings', async () => {
+  const ctx = setup(); const data = snapshot(); data.status.doors.overall_lock = 'UNLOCKED'; ctx.setData(data);
+  await ctx.controller.refresh();
+  ctx.setRequest(async () => { throw new Error('Nissan ApiError (HTTP 403)'); });
+  const target = char(ctx, 'lock', hap.Characteristic.LockTargetState);
+  await target.handleSetRequest(1); await ctx.controller.commandPromise; await settle();
+  assert.equal(ctx.controller.commandFault, true);
+  assert.equal(await target.handleGetRequest(), 0);
+  assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 92);
+  for (const key of ['plug', 'front_left-ajar', 'front_left-window', 'hatch_ajar']) {
+    assert.equal(await char(ctx, key, hap.Characteristic.ContactSensorState).handleGetRequest(), 0);
+    assert.equal(await char(ctx, key, hap.Characteristic.StatusFault).handleGetRequest(), 0, key);
+  }
+  ctx.controller.lastRead = 0;
+  assert.equal(await char(ctx, 'plug', hap.Characteristic.StatusFault).handleGetRequest(), 1);
+  await assert.rejects(char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest());
+  ctx.controller.stop();
+});
 
 test('one accessory contains correctly linked standard services and preserves observed state', async () => {
   const ctx = setup();
@@ -194,6 +261,7 @@ test('only a confirmed missing schedule removes its service', async () => {
 
 test('asynchronous Nissan failure is never treated as successful completion', async () => {
   const ctx = setup();
+  await ctx.controller.refresh();
   let polls = 0;
   ctx.setRequest(async method => {
     if (method === 'command') return { complete: false, request: { id: 'request', kind: 'DOOR' } };
@@ -205,6 +273,9 @@ test('asynchronous Nissan failure is never treated as successful completion', as
   assert.equal(polls, 1);
   assert.equal(ctx.controller.commandFault, true);
   assert.equal(ctx.controller.commandState, 'unlock: failed or unconfirmed');
+  assert.equal(await char(ctx, 'front_left-ajar', hap.Characteristic.StatusFault).handleGetRequest(), 0);
+  assert.equal(await char(ctx, 'plug', hap.Characteristic.StatusFault).handleGetRequest(), 0);
+  assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 92);
   ctx.controller.stop();
 });
 

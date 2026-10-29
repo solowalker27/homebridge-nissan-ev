@@ -311,6 +311,15 @@ not yet been tested with a new live sign-in or vehicle command.
 
 - Connection error: use **Check connection** in plugin settings. Check Homebridge
   storage ownership and internet access; sign in again if Nissan rejects the session.
+- Lock controls: the target stays at the requested state while the command is in
+  progress; current lock state changes only when Nissan reports it. A failed
+  command restores the target to the last reported state and is recorded in
+  **Last Command**, **Command Failed or Unconfirmed** and Homebridge logs. Valid
+  door/window, charge-cable and battery readings remain usable after command failures.
+  If Home immediately reports No Response, check for a `lock not sent` log line:
+  **Disable secure vehicle controls**, vehicle feature blocks or another pending
+  command may be preventing the write. The log identifies the reason. API read
+  failures or stale/missing telemetry can still make the affected status unavailable.
 - HTTP 401: reauthenticate locally after verifying official-app login.
 - HTTP 403: Nissan may require device verification or additional entitlement.
   The helper supports an optional `request_proof` object in the private auth file
