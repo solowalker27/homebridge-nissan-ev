@@ -295,6 +295,71 @@ remove one. **Schedule Delayed Climate** accepts
 `{"start":"2026-10-21T07:00:00-05:00","temperature":22}`. All temperatures are
 Celsius. Read back Nissan's schedule data to verify timezone/DST interpretation.
 
+## Logging
+
+Normal logging is always enabled. It reports an initial state baseline, then
+every changed scalar field in the returned vehicle status, capabilities, charging
+settings, climate defaults, schedules, maintenance and V2L data. Location changes
+are recorded without coordinates or addresses. Observation timestamps alone do
+not count as vehicle changes, and identical polls do not repeat state messages.
+Failed optional reads are reported separately rather than treated as changes or
+deletions. Loss of status, stale data and recovery are also logged.
+
+Each vehicle command gets a local reference such as **C1**. The logs record its
+request, Nissan's acceptance, reported success or failure, known safe failure
+reasons, and whether lock/charging telemetry reflects the requested state. Blocked
+commands explain the setting or pending command that prevented them. Unconfirmed
+commands are not automatically retried. A successful Nissan response does not
+prove that its cached telemetry has caught up.
+
+State changes found while polling are marked **poll detected; cause unknown**.
+Matching fields read immediately after a successful command are marked **plugin
+action C1 ... follow-up**, with an explicit causality qualification. Unrelated
+changes in that same read remain poll-detected changes. This distinguishes plugin
+actions from newly observed data without claiming the plugin caused everything
+that happened at the same time. Changes between polls cannot be reconstructed,
+and the first read after a restart establishes a new baseline.
+
+For example:
+
+```text
+Ariya: State change [poll detected; cause unknown]: status.battery.level: 79 -> 80.
+Ariya: Command C1 lock requested by plugin; awaiting Nissan confirmation.
+Ariya: Command C1 lock accepted by Nissan; awaiting completion.
+Ariya: Command C1 lock: Nissan reported success; reading vehicle status to observe the result.
+Ariya: State change [plugin action C1 lock follow-up; observed change, causality not guaranteed]: status.doors.overall_lock: UNLOCKED -> LOCKED.
+```
+
+Turn on **Enable debug logging** in plugin settings, save and restart the Nissan
+child bridge for additional details. It defaults to **off** and works without
+enabling Homebridge's global `-D` mode. Debug entries use the **[Debug]** prefix:
+
+- HTTP operation, endpoint, response status and timing; network failures; session
+  loading, token renewal and authentication-file lock wait times.
+- Poll read time, available vehicle observation timestamps, failed optional
+  sections, command completion checks and Nissan's available activation/status times.
+- HomeKit update counts, individual characteristic availability transitions and battery threshold
+  repeat pulses. Local threshold enable/percentage and indication changes are
+  included in normal logging.
+- Up to ten recent Nissan remote-service history entries, notification category/
+  channel opt-ins and leaving-vehicle reminder flags, read at most once every
+  five minutes. These are optional, read-only queries; unsupported/failed queries
+  do not invalidate normal vehicle status.
+
+History is correlated privately against request IDs from the last twenty plugin
+commands in this session. An unmatched entry is explicitly labeled as having an
+unknown caller; Nissan does not reliably identify the app, person or physical
+action responsible for a change. Notification diagnostics describe available
+settings and history, **not a live push-notification subscription or proof of
+delivery to an iPhone**. Cached/history data may lag the vehicle.
+
+Both log levels exclude passwords, tokens, authentication headers, request proof,
+raw request/response bodies, vehicle/request identifiers, and precise location.
+Free-text state values and unrecognized server reason text are withheld; known
+reason categories such as `TIMED_OUT`, `VEHICLE_UNREACHABLE` and
+`DEVICE_VERIFICATION` are retained. Turn debug logging off after investigating
+to reduce log volume and the additional diagnostic reads.
+
 ## Validation and troubleshooting
 
 The original Python-based read-only probe successfully authenticated, found a U.S. 2023

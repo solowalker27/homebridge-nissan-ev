@@ -61,6 +61,12 @@
         "default": false,
         "description": "Enable for status-only use to prevent accidental vehicle actions from Home, Siri or automations. Blocks all commands sent to Nissan, including locking/unlocking, climate, charging, horn/lights, schedules and vehicle wake/refresh/location requests. Status polling and local battery threshold controls remain available. This does not restrict access outside your home network. Off by default."
       },
+      "debugLogging": {
+        "title": "Enable debug logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Add HTTP connection timing/status, session renewal, polling timestamps, optional-query errors, command progress, HomeKit update summaries and threshold pulses. Read available Nissan remote-service history and notification settings at most once every five minutes. Does not subscribe to push notifications or identify who used another app. Credentials, raw requests/responses and precise location are excluded. Normal logging already includes reported state changes and command outcomes."
+      },
       "vehicles": {
         "title": "Vehicle names and overrides (optional)",
         "type": "array",

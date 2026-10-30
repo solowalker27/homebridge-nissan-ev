@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+- Log reported vehicle state changes by default, with before/after values and
+  poll versus matching plugin-command follow-up labels. Establish a baseline on
+  startup and avoid repeating unchanged polls or timestamp-only updates.
+- Give commands local references and log requests, acceptance, outcomes, known
+  failure reasons and whether lock/charging results are observed. Preserve the
+  distinction between Nissan's success response and cached telemetry.
+- Add optional debug logging in plugin settings, default off and independent of
+  Homebridge's global debug flag: HTTP timing/status, session renewal, poll and
+  command diagnostics, HomeKit update counts and threshold pulses.
+- Read available remote-service history and notification/reminder settings at
+  most every five minutes in debug mode. Correlate history privately with plugin
+  requests and leave unknown callers unidentified. Do not register push listeners.
+- Redact credentials, raw payloads, identifiers, free text and precise location;
+  keep safe reason categories. Diagnostic failures cannot invalidate core status.
+
 ## 0.5.2
 
 - Keep the requested lock/unlock target while Nissan processes a command instead

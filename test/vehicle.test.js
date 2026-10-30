@@ -42,6 +42,93 @@ function setup(config = {}, settings = {}, accessory) {
 const char = (ctx, key, Type) => ctx.accessory.services.find(s => s.subtype === `nissan:${key}`).getCharacteristic(Type);
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('default logging records poll changes, plugin commands and failures without inventing an external caller', async () => {
+  const ctx = setup(); const info = []; const warn = [];
+  ctx.platform.log.info = line => info.push(line); ctx.platform.log.warn = line => warn.push(line);
+  const data = snapshot(); data.status.doors.overall_lock = 'UNLOCKED'; ctx.setData(data);
+  await ctx.controller.refresh();
+  data.status.battery.level = 93; await ctx.controller.refresh();
+  assert.ok(info.some(line => /poll detected; cause unknown.*battery.level: 92 -> 93/.test(line)));
+  ctx.setRequest(async method => {
+    if (method === 'command') { data.status.doors.overall_lock = 'LOCKED'; return { complete: true }; }
+    return data;
+  });
+  await char(ctx, 'lock', hap.Characteristic.LockTargetState).handleSetRequest(1);
+  await ctx.controller.commandPromise;
+  assert.ok(info.some(line => /Command C1 lock requested by plugin/.test(line)));
+  assert.ok(info.some(line => /plugin action C1 lock follow-up.*overall_lock: UNLOCKED -> LOCKED/.test(line)));
+  assert.ok(info.some(line => /requested state observed/.test(line)));
+  ctx.setRequest(async () => { throw Object.assign(new Error('token-secret private@example.com'), { status: 403 }); });
+  await char(ctx, 'lock', hap.Characteristic.LockTargetState).handleSetRequest(0); await ctx.controller.commandPromise;
+  assert.match(warn.at(-1), /C2 unlock failed or unconfirmed.*403.*Not retried/);
+  assert.ok(![...info, ...warn].join('\n').includes('token-secret'));
+  assert.ok(!info.some(line => line.includes('[Debug]')));
+  ctx.controller.stop();
+});
+
+test('debug diagnostic reads are opt-in, throttled and cannot make otherwise valid vehicle status unavailable', async t => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  for (const enabled of [false, true]) {
+    const ctx = setup({ debugLogging: enabled }); const methods = []; const info = [];
+    ctx.platform.log.info = line => info.push(line);
+    ctx.setRequest(async method => {
+      methods.push(method);
+      if (method === 'diagnostics') throw new Error('private upstream failure');
+      return snapshot();
+    });
+    await ctx.controller.refresh(); await ctx.controller.refresh();
+    assert.equal(methods.filter(method => method === 'diagnostics').length, enabled ? 1 : 0);
+    t.mock.timers.tick(300000); await ctx.controller.refresh();
+    assert.equal(methods.filter(method => method === 'diagnostics').length, enabled ? 2 : 0);
+    assert.equal(ctx.controller.online, true);
+    assert.equal(await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest(), 92);
+    assert.equal(info.some(line => line.includes('[Debug]')), enabled);
+    assert.ok(!info.join('\n').includes('private upstream failure'));
+    ctx.controller.stop();
+  }
+});
+
+test('Nissan terminal failure reasons reach default logs without exposing the raw reason text', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ctx = setup({ debugLogging: true }); const warn = []; const info = [];
+  ctx.platform.log.warn = line => warn.push(line); ctx.platform.log.info = line => info.push(line);
+  await ctx.controller.refresh();
+  ctx.setRequest(async method => method === 'command'
+    ? { complete: false, request: { id: 'private-request-id', kind: 'door' } }
+    : { terminal: true, success: false, status: 'FAILED', status_details: 'TIMED_OUT private@example.com token-secret' });
+  await char(ctx, 'lock', hap.Characteristic.LockTargetState).handleSetRequest(0);
+  await settle(); t.mock.timers.tick(3000); await ctx.controller.commandPromise;
+  assert.match(warn.at(-1), /Nissan status FAILED; TIMED_OUT/);
+  const output = [...warn, ...info].join('\n');
+  for (const secret of ['private-request-id', 'private@example.com', 'token-secret']) assert.ok(!output.includes(secret), secret);
+  assert.ok(info.some(line => line.includes('Command completion check')));
+  ctx.controller.stop();
+});
+
+test('stale status is logged once and a successful poll logs recovery', async () => {
+  const ctx = setup(); const warn = []; const info = [];
+  ctx.platform.log.warn = line => warn.push(line); ctx.platform.log.info = line => info.push(line);
+  await ctx.controller.refresh(); ctx.controller.lastRead = 0;
+  for (let i = 0; i < 3; i++) await assert.rejects(char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest());
+  assert.equal(warn.filter(line => line.includes('became stale')).length, 1);
+  await ctx.controller.refresh(); assert.ok(info.some(line => line.includes('Status connection recovered')));
+  ctx.controller.stop();
+});
+
+test('debug identifies unavailable characteristics once per availability transition', async () => {
+  const ctx = setup({ debugLogging: true }); const info = [];
+  ctx.platform.log.info = line => info.push(line);
+  await ctx.controller.refresh(); info.length = 0;
+  ctx.controller.data.status.battery.level = null;
+  for (let i = 0; i < 3; i++) await assert.rejects(char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest());
+  const entries = () => info.filter(line => line.includes('HomeKit characteristic availability changed') && line.includes('"characteristic":"Battery Level"'));
+  assert.equal(entries().length, 1); assert.match(entries()[0], /"available":false/);
+  ctx.controller.data.status.battery.level = 92;
+  await char(ctx, 'battery', hap.Characteristic.BatteryLevel).handleGetRequest();
+  assert.equal(entries().length, 2); assert.match(entries()[1], /"available":true/);
+  ctx.controller.stop();
+});
+
 test('pending lock keeps the requested target without reporting an unconfirmed current state', async () => {
  for (const [action, initial, requested] of [['lock', 'UNLOCKED', 1], ['unlock', 'LOCKED', 0]]) {
   const ctx = setup();

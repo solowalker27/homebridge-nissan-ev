@@ -81,3 +81,50 @@ test('lock and unlock traverse the actual SDK, native HTTP and door completion p
  assert.ok(operations.every(op => op.variables.vin === 'SYNTHETICVIN'));
  assert.equal(operations[1].variables.serviceRequestId, 'door-request');
 });
+
+test('native debug HTTP and session-renewal details never log OAuth forms, credentials or tokens', async t => {
+ const file = await setup(t); const events = []; let graphqlCalls = 0;
+ t.mock.method(globalThis, 'fetch', async (url, request) => {
+  if (String(url).endsWith('/token')) return new Response(JSON.stringify({ access_token: 'rotated-access-secret', refresh_token: 'rotated-refresh-secret' }), { status: 200 });
+  if (++graphqlCalls === 1) return new Response(JSON.stringify({ error: 'private-upstream-body' }), { status: 401 });
+  return new Response(JSON.stringify({ data: { vehicles: [] } }), { status: 200 });
+ });
+ const adapter = new Adapter(file, { diagnostic: (event, detail) => events.push({ event, detail }) }); t.after(() => adapter.close());
+ await adapter.dispatch('vehicles');
+ const output = JSON.stringify(events);
+ assert.ok(events.some(item => item.event === 'HTTP response headers received' && item.detail.status === 401));
+ assert.ok(events.some(item => item.event === 'HTTP request started' && item.detail.operation === 'OAuth token exchange'));
+ assert.ok(events.some(item => item.event === 'Renewed tokens saved'));
+ assert.ok(events.some(item => item.event === 'Authentication file lock acquired'));
+ for (const secret of ['rotated-access-secret', 'rotated-refresh-secret', 'private-upstream-body', 'Authorization', 'grant_type']) assert.ok(!output.includes(secret), secret);
+ assert.equal((await privateRead(file)).tokens.access_token, 'rotated-access-secret');
+ assert.equal(adapter.clients.size, 0);
+});
+
+test('diagnostics only use read-only history and notification queries; command checks retain reason and timestamps', async t => {
+ const file = await setup(t); const calls = [];
+ const adapter = new Adapter(file, { clientFactory: options => ({ close() {},
+  async async_get_remote_service_history(vin, pagination) { calls.push({ name: 'history', readOnly: options.read_only, pagination }); return { history: [] }; },
+  async async_get_notification_preferences() { calls.push({ name: 'notifications', readOnly: options.read_only }); return []; },
+  async async_get_reminder_notifications_after_leaving_vehicle() { calls.push({ name: 'reminders', readOnly: options.read_only }); throw Object.assign(new Error('private-body'), { status: 403 }); },
+  async async_check_service_request() { return { is_terminal: true, is_success: false, status: 'FAILED', status_details: 'TIMED_OUT', status_change_date_time: '2026-10-29T12:00:00Z' }; },
+ }) });
+ const diagnostic = await adapter.dispatch('diagnostics', { vin: 'SYNTHETICVIN' });
+ assert.equal(calls.length, 3); assert.ok(calls.every(call => call.readOnly === true));
+ assert.deepEqual(calls[0].pagination, { page_number: 1, items_per_page: 10 });
+ assert.equal(diagnostic.errors.reminders.status, 403); assert.ok(!JSON.stringify(diagnostic).includes('private-body'));
+ const checked = await adapter.dispatch('command_status', { vin: 'SYNTHETICVIN', request: { id: 'test', kind: 'door' } });
+ assert.equal(checked.status_details, 'TIMED_OUT'); assert.equal(checked.status_change_date_time, '2026-10-29T12:00:00Z');
+});
+
+test('closing a debug-enabled adapter aborts its instrumented HTTP session', async t => {
+ const file = await setup(t); let started = false;
+ t.mock.method(globalThis, 'fetch', async (url, request) => new Promise((resolve, reject) => {
+  started = true;
+  request.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+ }));
+ const adapter = new Adapter(file, { diagnostic() {} });
+ const pending = adapter.dispatch('vehicles'); const check = assert.rejects(pending);
+ while (!started) await new Promise(resolve => setImmediate(resolve));
+ adapter.close(); await check; assert.equal(adapter.clients.size, 0);
+});

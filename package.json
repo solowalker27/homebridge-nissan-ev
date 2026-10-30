@@ -1,6 +1,6 @@
 {
   "name": "homebridge-nissan-ev",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "One HomeKit accessory per MyNISSAN vehicle, with linked status and remote-control services",
   "main": "index.js",
   "license": "MIT",
@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check lib/platform.js && node --check lib/vehicle.js && node --check lib/bridge.js && node --check lib/adapter.js && node --check lib/auth-ui.js && node --check homebridge-ui/server.js && node --check homebridge-ui/public/app.js"
+    "check": "node --check index.js && node --check lib/platform.js && node --check lib/vehicle.js && node --check lib/bridge.js && node --check lib/adapter.js && node --check lib/logging.js && node --check lib/auth-ui.js && node --check homebridge-ui/server.js && node --check homebridge-ui/public/app.js"
   },
   "devDependencies": {
     "homebridge": "2.4.0"

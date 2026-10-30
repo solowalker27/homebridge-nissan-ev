@@ -24,6 +24,17 @@ test('UI single-flight guard and path validation run before contacting Nissan',a
 test('upstream UI errors cannot leak credentials, tokens, or account diagnostics',async()=>{
  const c=setup();const pending=c.auth.request('check');c.reject(Object.assign(new Error('password-secret token-secret'),{status:401}));await assert.rejects(pending,e=>/Nissan rejected/.test(e.message)&&!e.message.includes('secret'));assert.equal(c.auth.busy,false);
 });
+test('settings debug logs connection outcomes without credentials or raw authentication errors', async () => {
+ const logs = [];
+ const auth = new AuthUi('/private/homebridge', { log: { info: line => logs.push(line) }, adapterFactory: (file, options) => ({
+  close() {},
+  async authenticate() { options.diagnostic?.('HTTP response headers received', { status: 403, operation: 'OAuth token exchange' }); throw Object.assign(new Error('DEVICE_VERIFICATION password-secret token-secret driver@example.com'), { status: 403 }); },
+ }) });
+ await assert.rejects(auth.request('login', { config: { debugLogging: true }, email: 'driver@example.com', password: 'password-secret' }));
+ const output = logs.join('\n');
+ assert.match(output, /Sign-in operation failed/); assert.match(output, /403/); assert.match(output, /DEVICE_VERIFICATION/);
+ for (const secret of ['password-secret', 'token-secret', 'driver@example.com']) assert.ok(!output.includes(secret));
+});
 test('UI timeout closes the native session and releases its guard',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});const c=setup();const pending=c.auth.request('check');const rejection=assert.rejects(pending,/timed out/);t.mock.timers.tick(90000);await rejection;assert.equal(c.adapter.closed,true);assert.equal(c.auth.busy,false);assert.equal(c.auth.adapters.size,0);
 });
